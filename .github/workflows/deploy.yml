@@ -29,13 +29,13 @@ jobs:
 
       - name: Inject Secrets into Config 🔐
         run: |
-          cat <<EOF > config.js
+          cat <<'EOF' > config.js
           window.CONFIG = {
-            url: '${{ secrets.TURSO_URL }}',
-            token: '${{ secrets.TURSO_TOKEN }}'
+            url: '${{ secrets.TURSO_URL || secrets.TURSO_DB_URL }}',
+            token: '${{ secrets.TURSO_TOKEN || secrets.TURSO_AUTH_TOKEN }}'
           };
           EOF
-          echo "Verification: config.js created successfully."
+          echo "Verification: config.js created successfully with quoted HEREDOC."
 
       - name: List files for debugging 🔍
         run: ls -la
