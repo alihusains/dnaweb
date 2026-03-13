@@ -225,9 +225,15 @@ const app = createApp({
             isLoading.value = true;
             error.value = null;
             try {
+                // Ensure URL starts with https:// for the web client if using libsql://
+                let formattedUrl = dbUrl.value.trim();
+                if (formattedUrl.startsWith('libsql://')) {
+                    formattedUrl = formattedUrl.replace('libsql://', 'https://');
+                }
+
                 libsqlClient = createClient({
-                    url: dbUrl.value,
-                    authToken: authToken.value
+                    url: formattedUrl,
+                    authToken: authToken.value.trim()
                 });
 
                 // Test connection
