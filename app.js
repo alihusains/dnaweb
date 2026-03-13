@@ -30,7 +30,15 @@ const app = createApp({
         };
 
         // Navigation State
+        const currentView = ref('cms'); // 'cms' or 'users'
+        const categories = ref([]);
+        const breadcrumbs = ref([]);
+        const currentCategory = ref(null);
+
         // --- User Management ---
+        const users = ref([]);
+        const showUserModal = ref(false);
+        const editingUser = ref({ id: null, email: '', password: '', role: 'editor' });
         const fetchUsers = async () => {
             if (currentUser.value?.role !== 'admin') return;
             try {
