@@ -229,6 +229,12 @@ const app = createApp({
             try {
                 // Ensure URL is correctly formatted for the web client
                 let formattedUrl = dbUrl.value.trim();
+                let token = authToken.value.trim();
+
+                // Handle accidental "Bearer " prefix
+                if (token.toLowerCase().startsWith('bearer ')) {
+                    token = token.substring(7).trim();
+                }
 
                 // 1. Convert libsql:// to https://
                 if (formattedUrl.startsWith('libsql://')) {
@@ -246,7 +252,7 @@ const app = createApp({
 
                 libsqlClient = createClient({
                     url: formattedUrl,
-                    authToken: authToken.value.trim()
+                    authToken: token
                 });
 
                 // Test connection
