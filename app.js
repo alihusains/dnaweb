@@ -178,7 +178,9 @@ const app = createApp({
         // --- Lifecycle ---
         onMounted(async () => {
             // Priority 1: window.CONFIG (GitHub Secrets / Local config.js)
-            if (window.CONFIG?.url && window.CONFIG?.token) {
+            // Only use if they are NOT the placeholders
+            if (window.CONFIG?.url && window.CONFIG?.url !== 'TURSO_URL_PLACEHOLDER' &&
+                window.CONFIG?.token && window.CONFIG?.token !== 'TURSO_TOKEN_PLACEHOLDER') {
                 dbUrl.value = window.CONFIG.url;
                 authToken.value = window.CONFIG.token;
             } else {
@@ -225,11 +227,22 @@ const app = createApp({
             isLoading.value = true;
             error.value = null;
             try {
-                // Ensure URL starts with https:// for the web client if using libsql://
+                // Ensure URL is correctly formatted for the web client
                 let formattedUrl = dbUrl.value.trim();
+
+                // 1. Convert libsql:// to https://
                 if (formattedUrl.startsWith('libsql://')) {
                     formattedUrl = formattedUrl.replace('libsql://', 'https://');
                 }
+                // 2. Add https:// if no protocol is present
+                else if (!formattedUrl.startsWith('https://') && !formattedUrl.startsWith('http://')) {
+                    formattedUrl = 'https://' + formattedUrl;
+                }
+
+                // 3. Remove trailing slash
+                formattedUrl = formattedUrl.replace(/\/$/, "");
+
+                console.log("Connecting to:", formattedUrl);
 
                 libsqlClient = createClient({
                     url: formattedUrl,
@@ -240,12 +253,22 @@ const app = createApp({
                 await libsqlClient.execute('SELECT 1');
 
                 // Save to local storage for this device
-                localStorage.setItem('tursoDbUrl', dbUrl.value);
-                localStorage.setItem('tursoAuthToken', authToken.value);
+                localStorage.setItem('tursoDbUrl', dbUrl.value.trim());
+                localStorage.setItem('tursoAuthToken', authToken.value.trim());
 
                 isDbConnected.value = true;
+                error.value = null;
             } catch (err) {
-                error.value = "Connection failed: " + err.message;
+                console.error("Connection Error Object:", err);
+
+                if (err.message.includes('fetch')) {
+                    error.value = "Connection failed: 'Failed to fetch'. This usually means the URL is incorrect, CORS is blocked, or the database is unreachable from the browser.";
+                } else if (err.status === 401 || err.message.toLowerCase().includes('unauthorized')) {
+                    error.value = "Connection failed: Unauthorized. Please check your Turso Auth Token.";
+                } else {
+                    error.value = "Connection failed: " + err.message;
+                }
+
                 isDbConnected.value = false;
                 throw err;
             } finally {
