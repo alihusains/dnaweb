@@ -7,5 +7,3 @@ CREATE TABLE IF NOT EXISTS users (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- Initial admin user (Password: admin123)
--- Hash generated via SHA-256 to match app.js logic
