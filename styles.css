@@ -1,0 +1,122 @@
+/* Custom Fonts */
+@font-face {
+    font-family: 'ShiaEssentials';
+    src: url('fonts/shiaessentials.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+}
+
+@font-face {
+    font-family: 'DnaGujarati';
+    src: url('fonts/dnagujarati.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+}
+
+@font-face {
+    font-family: 'DnaQuranTransliteration';
+    src: url('fonts/dnaqurantransliteration.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+}
+
+[v-cloak] {
+    display: none;
+}
+
+.font-arabic {
+    font-family: 'ShiaEssentials', serif;
+    direction: rtl;
+    line-height: 1.8;
+}
+
+.font-gujarati {
+    font-family: 'DnaGujarati', sans-serif;
+    line-height: 1.6;
+}
+
+.font-transliteration {
+    font-family: 'DnaQuranTransliteration', sans-serif;
+}
+
+/* Make sortable list dragging look nice */
+#sortable-list tr.sortable-ghost {
+    opacity: 0.4;
+    background-color: #f3f4f6;
+}
+
+/* Line Numbers for Textareas */
+.textarea-wrapper {
+    position: relative;
+    display: flex;
+    border: 1px solid #d1d5db; /* Tailwind gray-300 */
+    border-radius: 0.375rem; /* Tailwind rounded-md */
+    overflow: hidden;
+    background-color: #fff;
+}
+
+.textarea-wrapper:focus-within {
+    outline: 2px solid transparent;
+    outline-offset: 2px;
+    border-color: #6366f1; /* indigo-500 */
+    box-shadow: 0 0 0 1px #6366f1;
+}
+
+.line-numbers {
+    padding: 0.5rem 0.25rem;
+    text-align: right;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 0.875rem; /* text-sm */
+    line-height: 1.5rem; /* text-sm line-height */
+    color: #9ca3af; /* Tailwind gray-400 */
+    background-color: #f9fafb; /* Tailwind gray-50 */
+    border-right: 1px solid #e5e7eb; /* Tailwind gray-200 */
+    user-select: none;
+    min-width: 2rem;
+    white-space: pre;
+    overflow: hidden;
+}
+
+.textarea-with-lines {
+    flex-grow: 1;
+    border: none !important;
+    outline: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    line-height: 1.5rem; /* Must match .line-numbers line-height */
+    padding: 0.5rem 0.75rem;
+    resize: vertical;
+}
+
+/* For the RTL textarea specifically */
+.textarea-rtl .line-numbers {
+    border-right: none;
+    border-left: 1px solid #e5e7eb;
+    text-align: left;
+    order: 2; /* Put line numbers on the right side for RTL */
+}
+
+.textarea-rtl .textarea-with-lines {
+    order: 1;
+}
+
+/* Ensure arabic textarea line height matches its font */
+.textarea-wrapper.font-arabic .line-numbers,
+.textarea-wrapper.font-arabic .textarea-with-lines {
+    line-height: 1.8; /* Match .font-arabic */
+}
+
+/* Table inline inputs */
+.inline-input {
+    width: 100%;
+    background-color: #f3f4f6; /* gray-100 */
+    border: 1px solid #d1d5db;
+    border-radius: 0.25rem;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.875rem;
+}
+.inline-input:focus {
+    outline: none;
+    border-color: #6366f1; /* indigo-500 */
+    background-color: #fff;
+}

@@ -1,0 +1,20 @@
+# Local configuration
+config.js
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Claude Code
+.claude/
+.superpowers/
+
+# Backup/Log files
+*.bak
+*.orig
+*.patch
+migrate_log.txt
+migration.sql
+assets/duasandaamalapp.sqlite*
+assets/migrated_database*
+"data final audio - old_content.csv"
