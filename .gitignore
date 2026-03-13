@@ -1,5 +1,5 @@
 # Local configuration
-config.js
+# config.js (Now tracked for build stability)
 
 # OS files
 .DS_Store

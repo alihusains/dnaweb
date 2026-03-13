@@ -29,13 +29,9 @@ jobs:
 
       - name: Inject Secrets into Config 🔐
         run: |
-          cat <<EOF > config.js
-          window.CONFIG = {
-            url: "${{ secrets.TURSO_URL }}",
-            token: "${{ secrets.TURSO_TOKEN }}"
-          };
-          EOF
-          echo "Verification: config.js content (redacted):"
+          sed -i "s|TURSO_URL_PLACEHOLDER|${{ secrets.TURSO_URL }}|g" config.js
+          sed -i "s|TURSO_TOKEN_PLACEHOLDER|${{ secrets.TURSO_TOKEN }}|g" config.js
+          echo "Verification: config.js exists and placeholders replaced (redacted):"
           cat config.js | sed 's/token: ".*"/token: "***"/'
 
       - name: List files for debugging 🔍

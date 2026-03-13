@@ -1,0 +1,4 @@
+window.CONFIG = {
+  url: 'TURSO_URL_PLACEHOLDER',
+  token: 'TURSO_TOKEN_PLACEHOLDER'
+};
