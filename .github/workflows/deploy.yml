@@ -29,10 +29,17 @@ jobs:
 
       - name: Inject Secrets into Config 🔐
         run: |
-          echo "window.CONFIG = {" > config.js
-          echo "  url: '${{ secrets.TURSO_URL }}'," >> config.js
-          echo "  token: '${{ secrets.TURSO_TOKEN }}'" >> config.js
-          echo "};" >> config.js
+          cat <<EOF > config.js
+          window.CONFIG = {
+            url: "${{ secrets.TURSO_URL }}",
+            token: "${{ secrets.TURSO_TOKEN }}"
+          };
+          EOF
+          echo "Verification: config.js content (redacted):"
+          cat config.js | sed 's/token: ".*"/token: "***"/'
+
+      - name: List files for debugging 🔍
+        run: ls -la
 
       - name: Upload artifact 📤
         uses: actions/upload-pages-artifact@v3
