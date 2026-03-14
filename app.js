@@ -30,7 +30,7 @@ const app = createApp({
         };
 
         // Navigation State
-        const currentView = ref('cms'); // 'cms' or 'users'
+        const currentView = ref('categories'); // Default to categories
         const categories = ref([]);
         const breadcrumbs = ref([]);
         const currentCategory = ref(null);
