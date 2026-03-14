@@ -1,5 +1,3 @@
-import { createClient } from '@libsql/client';
-
 const { createApp, ref, reactive, onMounted, computed, watch } = Vue;
 
 const app = createApp({
@@ -12,7 +10,97 @@ const app = createApp({
         const currentUser = ref(null);
         const isLoading = ref(false);
         const error = ref(null);
-        let libsqlClient = null;
+
+        // --- Database Helpers (Replacement for @libsql/client) ---
+        const mapArgs = (args) => {
+            if (!args) return [];
+            return args.map(arg => {
+                if (arg === null) return { type: 'null', value: null };
+                if (typeof arg === 'number') return { type: 'integer', value: String(arg) };
+                if (typeof arg === 'boolean') return { type: 'integer', value: arg ? '1' : '0' };
+                return { type: 'text', value: String(arg) };
+            });
+        };
+
+        const dbRequest = async (requests) => {
+            let url = dbUrl.value.replace('libsql://', 'https://');
+            if (url.endsWith('/')) url = url.slice(0, -1);
+            if (!url.endsWith('/v2/pipeline')) url += '/v2/pipeline';
+
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${authToken.value}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ requests })
+            });
+
+            if (!response.ok) {
+                const text = await response.text();
+                throw new Error(`HTTP ${response.status}: ${text}`);
+            }
+
+            const data = await response.json();
+            if (data.error) throw new Error(data.error.message || data.error);
+            return data.results;
+        };
+
+        const dbExecute = async (sqlOrConfig) => {
+            const sql = typeof sqlOrConfig === 'string' ? sqlOrConfig : sqlOrConfig.sql;
+            const args = typeof sqlOrConfig === 'string' ? [] : (sqlOrConfig.args || []);
+
+            const requests = [
+                {
+                    type: 'execute',
+                    stmt: {
+                        sql,
+                        args: mapArgs(args)
+                    }
+                },
+                { type: 'close' }
+            ];
+
+            const results = await dbRequest(requests);
+            const execResult = results[0];
+
+            if (execResult.type === 'error') throw new Error(execResult.error.message);
+
+            const result = execResult.response.result;
+            if (!result || !result.cols) return { rows: [], columns: [] };
+
+            const rows = result.rows.map(row => {
+                const obj = {};
+                result.cols.forEach((col, i) => {
+                    const val = row[i];
+                    // Turso values can be objects with a 'value' property
+                    obj[col.name] = (val && typeof val === 'object' && 'value' in val) ? val.value : val;
+                });
+                return obj;
+            });
+
+            return { rows };
+        };
+
+        const dbBatch = async (stmts) => {
+            const requests = stmts.map(s => ({
+                type: 'execute',
+                stmt: {
+                    sql: s.sql,
+                    args: mapArgs(s.args)
+                }
+            }));
+            requests.push({ type: 'close' });
+
+            const results = await dbRequest(requests);
+
+            // Check for errors in any result
+            for (const res of results) {
+                if (res.type === 'error') throw new Error(res.error.message);
+            }
+
+            return results;
+        };
 
         // Login form state
         const loginForm = reactive({
@@ -30,19 +118,11 @@ const app = createApp({
         };
 
         // Navigation State
-        const currentView = ref('categories'); // Default to categories
-        const categories = ref([]);
-        const breadcrumbs = ref([]);
-        const currentCategory = ref(null);
-
         // --- User Management ---
-        const users = ref([]);
-        const showUserModal = ref(false);
-        const editingUser = ref({ id: null, email: '', password: '', role: 'editor' });
         const fetchUsers = async () => {
             if (currentUser.value?.role !== 'admin') return;
             try {
-                const result = await libsqlClient.execute('SELECT id, email, role, created_at FROM users ORDER BY created_at DESC');
+                const result = await dbExecute('SELECT id, email, role, created_at FROM users ORDER BY created_at DESC');
                 users.value = result.rows.map(row => ({
                     id: row.id,
                     email: String(row.email),
@@ -71,12 +151,12 @@ const app = createApp({
                     // Update
                     if (editingUser.value.password) {
                         const hashedPassword = await hashPassword(editingUser.value.password);
-                        await libsqlClient.execute({
+                        await dbExecute({
                             sql: 'UPDATE users SET email = ?, password_hash = ?, role = ? WHERE id = ?',
                             args: [editingUser.value.email, hashedPassword, editingUser.value.role, editingUser.value.id]
                         });
                     } else {
-                        await libsqlClient.execute({
+                        await dbExecute({
                             sql: 'UPDATE users SET email = ?, role = ? WHERE id = ?',
                             args: [editingUser.value.email, editingUser.value.role, editingUser.value.id]
                         });
@@ -85,7 +165,7 @@ const app = createApp({
                     // Insert
                     if (!editingUser.value.password) throw new Error("Password is required for new users.");
                     const hashedPassword = await hashPassword(editingUser.value.password);
-                    await libsqlClient.execute({
+                    await dbExecute({
                         sql: 'INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?)',
                         args: [editingUser.value.email, hashedPassword, editingUser.value.role]
                     });
@@ -107,7 +187,7 @@ const app = createApp({
             if (!confirm(`Delete user ${user.email}?`)) return;
             isLoading.value = true;
             try {
-                await libsqlClient.execute({
+                await dbExecute({
                     sql: 'DELETE FROM users WHERE id = ?',
                     args: [user.id]
                 });
@@ -178,9 +258,7 @@ const app = createApp({
         // --- Lifecycle ---
         onMounted(async () => {
             // Priority 1: window.CONFIG (GitHub Secrets / Local config.js)
-            // Only use if they are NOT the placeholders
-            if (window.CONFIG?.url && window.CONFIG?.url !== 'TURSO_URL_PLACEHOLDER' &&
-                window.CONFIG?.token && window.CONFIG?.token !== 'TURSO_TOKEN_PLACEHOLDER') {
+            if (window.CONFIG?.url && window.CONFIG?.token) {
                 dbUrl.value = window.CONFIG.url;
                 authToken.value = window.CONFIG.token;
             } else {
@@ -192,7 +270,6 @@ const app = createApp({
                     dbUrl.value = savedDbUrl;
                     authToken.value = savedAuthToken;
                 } else {
-                    // Default fallback URL (useful for initial clone)
                     dbUrl.value = 'libsql://duasandaamalapp-alihusains.aws-ap-northeast-1.turso.io';
                 }
             }
@@ -201,20 +278,13 @@ const app = createApp({
                 try {
                     await connectDb();
 
-                    // Restore user session with 48h expiry check
+                    // Restore user session
                     const savedUser = localStorage.getItem('cmsUser');
-                    const sessionExpiry = localStorage.getItem('cmsSessionExpiry');
-
-                    if (savedUser && sessionExpiry) {
-                        if (Date.now() < parseInt(sessionExpiry)) {
-                            currentUser.value = JSON.parse(savedUser);
-                            isLoggedIn.value = true;
-                            await fetchLanguages();
-                            await fetchCategories(null);
-                        } else {
-                            console.log("Session expired.");
-                            logout();
-                        }
+                    if (savedUser) {
+                        currentUser.value = JSON.parse(savedUser);
+                        isLoggedIn.value = true;
+                        await fetchLanguages();
+                        await fetchCategories(null);
                     }
                 } catch (e) {
                     console.log("Auto-connect or session restoration failed:", e);
@@ -227,54 +297,16 @@ const app = createApp({
             isLoading.value = true;
             error.value = null;
             try {
-                // Ensure URL is correctly formatted for the web client
-                let formattedUrl = dbUrl.value.trim();
-                let token = authToken.value.trim();
-
-                // Handle accidental "Bearer " prefix
-                if (token.toLowerCase().startsWith('bearer ')) {
-                    token = token.substring(7).trim();
-                }
-
-                // 1. Convert libsql:// to https://
-                if (formattedUrl.startsWith('libsql://')) {
-                    formattedUrl = formattedUrl.replace('libsql://', 'https://');
-                }
-                // 2. Add https:// if no protocol is present
-                else if (!formattedUrl.startsWith('https://') && !formattedUrl.startsWith('http://')) {
-                    formattedUrl = 'https://' + formattedUrl;
-                }
-
-                // 3. Remove trailing slash
-                formattedUrl = formattedUrl.replace(/\/$/, "");
-
-                console.log("Connecting to:", formattedUrl);
-
-                libsqlClient = createClient({
-                    url: formattedUrl,
-                    authToken: token
-                });
-
                 // Test connection
-                await libsqlClient.execute('SELECT 1');
+                await dbExecute('SELECT 1');
 
                 // Save to local storage for this device
-                localStorage.setItem('tursoDbUrl', dbUrl.value.trim());
-                localStorage.setItem('tursoAuthToken', authToken.value.trim());
+                localStorage.setItem('tursoDbUrl', dbUrl.value);
+                localStorage.setItem('tursoAuthToken', authToken.value);
 
                 isDbConnected.value = true;
-                error.value = null;
             } catch (err) {
-                console.error("Connection Error Object:", err);
-
-                if (err.message.includes('fetch')) {
-                    error.value = "Connection failed: 'Failed to fetch'. This usually means the URL is incorrect, CORS is blocked, or the database is unreachable from the browser.";
-                } else if (err.status === 401 || err.message.toLowerCase().includes('unauthorized')) {
-                    error.value = "Connection failed: Unauthorized. Please check your Turso Auth Token.";
-                } else {
-                    error.value = "Connection failed: " + err.message;
-                }
-
+                error.value = "Connection failed: " + err.message;
                 isDbConnected.value = false;
                 throw err;
             } finally {
@@ -288,7 +320,7 @@ const app = createApp({
             error.value = null;
             try {
                 const hashedPassword = await hashPassword(loginForm.password);
-                const result = await libsqlClient.execute({
+                const result = await dbExecute({
                     sql: 'SELECT * FROM users WHERE email = ? AND password_hash = ?',
                     args: [loginForm.email, hashedPassword]
                 });
@@ -301,10 +333,8 @@ const app = createApp({
                     };
                     isLoggedIn.value = true;
 
-                    // Save session to LocalStorage (48h expiry)
-                    const expiry = Date.now() + (48 * 60 * 60 * 1000);
+                    // Save session to LocalStorage
                     localStorage.setItem('cmsUser', JSON.stringify(currentUser.value));
-                    localStorage.setItem('cmsSessionExpiry', expiry.toString());
 
                     // Clear password from memory
                     loginForm.password = '';
@@ -325,7 +355,6 @@ const app = createApp({
             isLoggedIn.value = false;
             currentUser.value = null;
             localStorage.removeItem('cmsUser');
-            localStorage.removeItem('cmsSessionExpiry');
             categories.value = [];
             breadcrumbs.value = [];
             currentCategory.value = null;
@@ -335,7 +364,7 @@ const app = createApp({
         const disconnectDb = () => {
             logout();
             isDbConnected.value = false;
-            libsqlClient = null;
+            // Disconnect (no-op now)
             localStorage.removeItem('tursoDbUrl');
             localStorage.removeItem('tursoAuthToken');
         };
@@ -343,7 +372,7 @@ const app = createApp({
         // --- Languages Management ---
         const fetchLanguages = async () => {
             try {
-                const result = await libsqlClient.execute('SELECT * FROM languages ORDER BY id ASC');
+                const result = await dbExecute('SELECT * FROM languages ORDER BY id ASC');
                 languages.value = result.rows.map(row => ({
                     id: row.id,
                     code: String(row.code),
@@ -377,12 +406,12 @@ const app = createApp({
             try {
                 const isRtl = editingLanguage.value.is_rtl ? 1 : 0;
                 if (editingLanguage.value.id) {
-                    await libsqlClient.execute({
+                    await dbExecute({
                         sql: `UPDATE languages SET code = ?, name = ?, is_rtl = ? WHERE id = ?`,
                         args: [editingLanguage.value.code, editingLanguage.value.name, isRtl, editingLanguage.value.id]
                     });
                 } else {
-                    await libsqlClient.execute({
+                    await dbExecute({
                         sql: `INSERT INTO languages (code, name, is_rtl) VALUES (?, ?, ?)`,
                         args: [editingLanguage.value.code, editingLanguage.value.name, isRtl]
                     });
@@ -400,8 +429,8 @@ const app = createApp({
             if (!confirm(`Are you sure you want to delete the language '${lang.name}'?`)) return;
             isLoading.value = true;
             try {
-                await libsqlClient.execute('PRAGMA foreign_keys = ON');
-                await libsqlClient.execute({
+                await dbExecute('PRAGMA foreign_keys = ON');
+                await dbExecute({
                     sql: 'DELETE FROM languages WHERE id = ?',
                     args: [lang.id]
                 });
@@ -420,12 +449,12 @@ const app = createApp({
             try {
                 let result;
                 if (parentId === null) {
-                    result = await libsqlClient.execute({
+                    result = await dbExecute({
                         sql: 'SELECT * FROM categories WHERE parent_id IS NULL AND language_code = ? ORDER BY sequence ASC',
                         args: [selectedLanguageCode.value]
                     });
                 } else {
-                    result = await libsqlClient.execute({
+                    result = await dbExecute({
                         sql: 'SELECT * FROM categories WHERE parent_id = ? AND language_code = ? ORDER BY sequence ASC',
                         args: [parentId, selectedLanguageCode.value]
                     });
@@ -530,7 +559,7 @@ const app = createApp({
                 const isLeaf = editingCategory.value.is_last_level ? 1 : 0;
 
                 if (editingCategory.value.id) {
-                    await libsqlClient.execute({
+                    await dbExecute({
                         sql: `UPDATE categories SET
                                 lang_name = ?, english_name = ?,
                                 audio_url = ?, video_url = ?, duas_url = ?,
@@ -557,7 +586,7 @@ const app = createApp({
                         ]
                     });
                 } else {
-                    await libsqlClient.execute({
+                    await dbExecute({
                         sql: `INSERT INTO categories
                                 (parent_id, sequence, lang_name, english_name, audio_url, video_url, duas_url, local_audio_url, local_video_url, related1, related2, notify_hijri_date, label1, label2, is_last_level, is_trans, language_code)
                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
@@ -597,8 +626,8 @@ const app = createApp({
             }
             isLoading.value = true;
             try {
-                await libsqlClient.execute('PRAGMA foreign_keys = ON');
-                await libsqlClient.execute({
+                await dbExecute('PRAGMA foreign_keys = ON');
+                await dbExecute({
                     sql: 'DELETE FROM categories WHERE id = ?',
                     args: [category.id]
                 });
@@ -650,7 +679,7 @@ const app = createApp({
                     sql: 'UPDATE categories SET sequence = ? WHERE id = ?',
                     args: [cat.sequence, cat.id]
                 }));
-                await libsqlClient.batch(stmts);
+                await dbBatch(stmts);
 
                 // Sort the categories array based on the new sequence to reflect it instantly
                 categories.value.sort((a, b) => a.sequence - b.sequence);
@@ -703,7 +732,7 @@ const app = createApp({
             error.value = null;
 
             try {
-                const result = await libsqlClient.execute({
+                const result = await dbExecute({
                     sql: 'SELECT * FROM item_translations WHERE category_id = ? ORDER BY sequence ASC',
                     args: [showTranslationsFor.value.id]
                 });
@@ -741,7 +770,7 @@ const app = createApp({
             isLoading.value = true;
             error.value = null;
             try {
-                await libsqlClient.execute({
+                await dbExecute({
                     sql: `UPDATE categories SET
                             audio_url = ?, video_url = ?, duas_url = ?,
                             related1 = ?, related2 = ?, notify_hijri_date = ?, label1 = ?, label2 = ?,
@@ -923,7 +952,7 @@ const app = createApp({
                     args: [hasTransliteration ? 1 : 0, catId]
                 });
 
-                await libsqlClient.batch(stmts);
+                await dbBatch(stmts);
 
                 unsavedChanges.value = false;
                 deletedTranslationIds.value = [];
