@@ -1,22 +1,29 @@
 /* Custom Fonts */
 @font-face {
-    font-family: 'ShiaEssentials';
-    src: url('fonts/shiaessentials.ttf') format('truetype');
+    font-family: 'KFGQPC Uthmanic Script HAFS';
+    src: url('fonts/KFGQPC Uthmanic Script HAFS Regular.ttf') format('truetype');
     font-weight: normal;
     font-style: normal;
 }
 
 @font-face {
-    font-family: 'DnaGujarati';
-    src: url('fonts/dnagujarati.ttf') format('truetype');
+    font-family: 'KFGQPC Uthman Taha Naskh';
+    src: url('fonts/KFGQPC Uthman Taha Naskh Regular.ttf') format('truetype');
     font-weight: normal;
     font-style: normal;
 }
 
 @font-face {
-    font-family: 'DnaQuranTransliteration';
-    src: url('fonts/dnaqurantransliteration.ttf') format('truetype');
+    font-family: 'Shruti';
+    src: url('fonts/shruti.ttf') format('truetype');
     font-weight: normal;
+    font-style: normal;
+}
+
+@font-face {
+    font-family: 'Shruti';
+    src: url('fonts/shrutib.ttf') format('truetype');
+    font-weight: bold;
     font-style: normal;
 }
 
@@ -25,18 +32,14 @@
 }
 
 .font-arabic {
-    font-family: 'ShiaEssentials', serif;
+    font-family: 'KFGQPC Uthmanic Script HAFS', 'KFGQPC Uthman Taha Naskh', serif;
     direction: rtl;
     line-height: 1.8;
 }
 
 .font-gujarati {
-    font-family: 'DnaGujarati', sans-serif;
+    font-family: 'Shruti', sans-serif;
     line-height: 1.6;
-}
-
-.font-transliteration {
-    font-family: 'DnaQuranTransliteration', sans-serif;
 }
 
 /* Make sortable list dragging look nice */

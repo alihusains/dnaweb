@@ -11,6 +11,15 @@ const app = createApp({
         const isLoading = ref(false);
         const error = ref(null);
 
+        // Navigation & UI State
+        const currentView = ref('categories');
+        const users = ref([]);
+        const showUserModal = ref(false);
+        const editingUser = ref({ id: null, email: '', password: '', role: 'editor' });
+        const categories = ref([]);
+        const breadcrumbs = ref([]);
+        const currentCategory = ref(null);
+
         // --- Database Helpers (Replacement for @libsql/client) ---
         const mapArgs = (args) => {
             if (!args) return [];
