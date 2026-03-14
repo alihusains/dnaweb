@@ -1,4 +1,4 @@
 window.CONFIG = {
-  url: 'TURSO_URL_PLACEHOLDER',
-  token: 'TURSO_TOKEN_PLACEHOLDER'
+  url: 'libsql://duasandaamalapp-alihusains.aws-ap-northeast-1.turso.io',
+  token: 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzYwODM1ODEsImlhdCI6MTc3MzQ5MTU4MSwiaWQiOiIwMTljZTZhZS00ODAxLTcyZGQtOTZjYy04MGRiYWU3MzgzYTAiLCJyaWQiOiJlZGNjN2RmOS01ZGZkLTRmNjgtOGU5NC00MzBlZmQ2ZWFjM2MifQ.t4K5owc8kbTVOhtiTLoXqapmKM9oDf6oolC6fTdh0mtC1rABRKgdZqwD9KmnW1eMYGdvcRAHnhHVISLUDsm8Cw'
 };
