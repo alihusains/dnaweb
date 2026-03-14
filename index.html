@@ -742,6 +742,13 @@
                                         <label class="block text-sm font-medium text-gray-700 mb-1">Notify Hijri Date</label>
                                         <input v-model="editingCategory.notify_hijri_date" type="text" placeholder="e.g. 01-10" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500">
                                     </div>
+
+                                    <div class="mt-3 flex items-center gap-2 bg-gray-50 p-2 rounded border border-gray-200">
+                                        <input v-model="editingCategory.is_trans" type="checkbox" id="modal_is_trans_flag" class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded">
+                                        <label for="modal_is_trans_flag" class="text-sm text-gray-900 font-medium">
+                                            Has Transliteration (is_trans)
+                                        </label>
+                                    </div>
                                 </div>
 
                             </div>

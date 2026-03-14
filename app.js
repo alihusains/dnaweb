@@ -254,8 +254,9 @@ const app = createApp({
 
         const categoryMeta = ref({
             audio_url: '', video_url: '', duas_url: '',
+            local_audio_url: '', local_video_url: '',
             related1: null, related2: null, notify_hijri_date: '',
-            label1: '', label2: '', is_trans: 0
+            label1: '', label2: '', is_trans: false
         });
 
         const bulkInput = reactive({
@@ -542,6 +543,7 @@ const app = createApp({
                     notify_hijri_date: category.notify_hijri_date == null ? '' : String(category.notify_hijri_date),
                     label1: category.label1 == null ? '' : String(category.label1),
                     label2: category.label2 == null ? '' : String(category.label2),
+                    is_trans: category.is_trans || 0,
                     is_last_level: category.is_last_level,
                     language_code: category.language_code || selectedLanguageCode.value
                 };
@@ -558,6 +560,7 @@ const app = createApp({
                     english_name: '',
                     audio_url: '', video_url: '', duas_url: '', local_audio_url: '', local_video_url: '',
                     related1: null, related2: null, notify_hijri_date: '', label1: '', label2: '',
+                    is_trans: 0,
                     is_last_level: false,
                     language_code: selectedLanguageCode.value
                 };
@@ -582,7 +585,7 @@ const app = createApp({
                                 audio_url = ?, video_url = ?, duas_url = ?,
                                 local_audio_url = ?, local_video_url = ?,
                                 related1 = ?, related2 = ?, notify_hijri_date = ?, label1 = ?, label2 = ?,
-                                is_last_level = ?, language_code = ?
+                                is_last_level = ?, is_trans = ?, language_code = ?
                               WHERE id = ?`,
                         args: [
                             editingCategory.value.lang_name,
@@ -598,6 +601,7 @@ const app = createApp({
                             editingCategory.value.label1 || null,
                             editingCategory.value.label2 || null,
                             isLeaf,
+                            editingCategory.value.is_trans ? 1 : 0,
                             editingCategory.value.language_code,
                             editingCategory.value.id
                         ]
@@ -606,7 +610,7 @@ const app = createApp({
                     await dbExecute({
                         sql: `INSERT INTO categories
                                 (parent_id, sequence, lang_name, english_name, audio_url, video_url, duas_url, local_audio_url, local_video_url, related1, related2, notify_hijri_date, label1, label2, is_last_level, is_trans, language_code)
-                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                         args: [
                             editingCategory.value.parent_id,
                             editingCategory.value.sequence,
@@ -623,12 +627,19 @@ const app = createApp({
                             editingCategory.value.label1 || null,
                             editingCategory.value.label2 || null,
                             isLeaf,
+                            editingCategory.value.is_trans ? 1 : 0,
                             editingCategory.value.language_code
                         ]
                     });
                 }
 
                 closeCategoryModal();
+
+                // Sync with translation view if needed
+                if (showTranslationsFor.value && showTranslationsFor.value.id === editingCategory.value.id) {
+                    categoryMeta.value.is_trans = editingCategory.value.is_trans ? 1 : 0;
+                }
+
                 await fetchCategories(currentCategory.value ? currentCategory.value.id : null);
             } catch (err) {
                 error.value = "Failed to save category: " + err.message;
@@ -674,7 +685,7 @@ const app = createApp({
             dropTargetIndex.value = index;
         };
 
-        const drop = async (event) => {
+        const drop = async () => {
             const fromIndex = draggedIndex.value;
             const toIndex = dropTargetIndex.value;
 
@@ -1015,6 +1026,12 @@ const app = createApp({
                 });
 
                 await dbBatch(stmts);
+
+                // Sync local meta flag
+                if (showTranslationsFor.value && showTranslationsFor.value.id === catId) {
+                    categoryMeta.value.is_trans = hasTransliteration;
+                    showTranslationsFor.value.is_trans = hasTransliteration ? 1 : 0;
+                }
 
                 unsavedChanges.value = false;
                 deletedTranslationIds.value = [];
