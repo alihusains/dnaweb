@@ -998,7 +998,7 @@ const app = createApp({
 
             dragStart, dragOver, drop, draggedIndex, dropTargetIndex,
 
-            showTranslationsFor, translations, unsavedChanges, bulkInput, selectedLanguageId, selectedLanguageName, categoryMeta,
+            showTranslationsFor, translations, unsavedChanges, bulkInput, selectedLanguageId, selectedLanguageCode, selectedLanguageName, categoryMeta,
             viewTranslations, closeTranslations, processBulkTranslations, getLineNumbers,
             addTranslationRow, removeTranslationRow, toggleEditTranslation, copySql, sortTranslations, saveTranslations, saveCategoryMeta
         };
