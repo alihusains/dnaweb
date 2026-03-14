@@ -261,8 +261,15 @@ const app = createApp({
         const bulkInput = reactive({
             arabic: '',
             transliteration: '',
-            translation: ''
+            translation: '',
+            mode: 'replace' // 'replace' or 'append'
         });
+
+        const showBulkArea = ref(false);
+
+        const toggleBulkArea = () => {
+            showBulkArea.value = !showBulkArea.value;
+        };
 
         // --- Lifecycle ---
         onMounted(async () => {
@@ -707,15 +714,13 @@ const app = createApp({
             unsavedChanges.value = false;
             deletedTranslationIds.value = [];
 
-            bulkInput.arabic = '';
-            bulkInput.transliteration = '';
-            bulkInput.translation = '';
-
             // Populate category meta for editing on the content screen
             categoryMeta.value = {
                 audio_url: category.audio_url == null ? '' : String(category.audio_url),
                 video_url: category.video_url == null ? '' : String(category.video_url),
                 duas_url: category.duas_url == null ? '' : String(category.duas_url),
+                local_audio_url: category.local_audio_url == null ? '' : String(category.local_audio_url),
+                local_video_url: category.local_video_url == null ? '' : String(category.local_video_url),
                 is_trans: category.is_trans === 1,
                 related1: category.related1,
                 related2: category.related2,
@@ -733,6 +738,12 @@ const app = createApp({
             } else {
                 translations.value = [];
             }
+
+            // Pre-fill bulk input from existing translations
+            bulkInput.arabic = translations.value.map(t => t.arabic || '').join('\n');
+            bulkInput.transliteration = translations.value.map(t => t.transliteration || '').join('\n');
+            bulkInput.translation = translations.value.map(t => t.translation || '').join('\n');
+            bulkInput.mode = 'replace'; // Default to replace when opening
         };
 
         const fetchTranslationsForCategoryAndLanguage = async () => {
@@ -783,6 +794,7 @@ const app = createApp({
                 await dbExecute({
                     sql: `UPDATE categories SET
                             audio_url = ?, video_url = ?, duas_url = ?,
+                            local_audio_url = ?, local_video_url = ?,
                             related1 = ?, related2 = ?, notify_hijri_date = ?, label1 = ?, label2 = ?,
                             is_trans = ?
                           WHERE id = ?`,
@@ -790,6 +802,8 @@ const app = createApp({
                         categoryMeta.value.audio_url || null,
                         categoryMeta.value.video_url || null,
                         categoryMeta.value.duas_url || null,
+                        categoryMeta.value.local_audio_url || null,
+                        categoryMeta.value.local_video_url || null,
                         categoryMeta.value.related1 || null,
                         categoryMeta.value.related2 || null,
                         categoryMeta.value.notify_hijri_date || null,
@@ -799,6 +813,22 @@ const app = createApp({
                         showTranslationsFor.value.id
                     ]
                 });
+
+                // Sync local state
+                const cat = showTranslationsFor.value;
+                cat.audio_url = categoryMeta.value.audio_url || null;
+                cat.video_url = categoryMeta.value.video_url || null;
+                cat.duas_url = categoryMeta.value.duas_url || null;
+                cat.local_audio_url = categoryMeta.value.local_audio_url || null;
+                cat.local_video_url = categoryMeta.value.local_video_url || null;
+                cat.related1 = categoryMeta.value.related1 || null;
+                cat.related2 = categoryMeta.value.related2 || null;
+                cat.notify_hijri_date = categoryMeta.value.notify_hijri_date || null;
+                cat.label1 = categoryMeta.value.label1 || null;
+                cat.label2 = categoryMeta.value.label2 || null;
+                cat.is_trans = categoryMeta.value.is_trans ? 1 : 0;
+
+                unsavedChanges.value = false;
                 alert("Category properties saved successfully!");
             } catch (err) {
                 error.value = "Failed to save category properties: " + err.message;
@@ -824,7 +854,18 @@ const app = createApp({
                 return;
             }
 
-            let currentSeq = translations.value.length > 0 ? Math.max(...translations.value.map(t => t.sequence)) : 0;
+            let currentSeq = 0;
+            if (bulkInput.mode === 'append') {
+                currentSeq = translations.value.length > 0 ? Math.max(...translations.value.map(t => t.sequence)) : 0;
+            } else {
+                // If replacing, we mark all existing ones for deletion if they have IDs
+                translations.value.forEach(t => {
+                    if (t.id && !deletedTranslationIds.value.includes(t.id)) {
+                        deletedTranslationIds.value.push(t.id);
+                    }
+                });
+            }
+
             const langTitle = showTranslationsFor.value.english_name;
 
             const newTranslations = [];
@@ -851,9 +892,15 @@ const app = createApp({
                 });
             }
 
-            translations.value = [...translations.value, ...newTranslations];
+            if (bulkInput.mode === 'replace') {
+                translations.value = newTranslations;
+            } else {
+                translations.value = [...translations.value, ...newTranslations];
+            }
+
             unsavedChanges.value = true;
 
+            // Clear bulk input after processing
             bulkInput.arabic = '';
             bulkInput.transliteration = '';
             bulkInput.translation = '';
@@ -933,6 +980,11 @@ const app = createApp({
 
                 // 2. Process Inserts/Updates
                 validRows.forEach((row) => {
+                    const arabic = row.arabic.trim() || null;
+                    const translation = row.translation.trim() || null;
+                    const transliteration = row.transliteration.trim() || null;
+                    const langTitle = row.language_title.trim() || null;
+
                     if (row.id) {
                         // Update
                         stmts.push({
@@ -940,7 +992,7 @@ const app = createApp({
                                     sequence = ?, language_title = ?, arabic = ?, translation = ?, transliteration = ?, is_visible = ?
                                   WHERE id = ?`,
                             args: [
-                                row.sequence, row.language_title.trim(), row.arabic.trim(), row.translation.trim(), row.transliteration.trim(), row.is_visible ? 1 : 0, row.id
+                                row.sequence, langTitle, arabic, translation, transliteration, row.is_visible ? 1 : 0, row.id
                             ]
                         });
                     } else {
@@ -950,7 +1002,7 @@ const app = createApp({
                                     (category_id, sequence, language_title, arabic, translation, transliteration, is_visible)
                                   VALUES (?, ?, ?, ?, ?, ?, ?)`,
                             args: [
-                                catId, row.sequence, row.language_title.trim(), row.arabic.trim(), row.translation.trim(), row.transliteration.trim(), row.is_visible ? 1 : 0
+                                catId, row.sequence, langTitle, arabic, translation, transliteration, row.is_visible ? 1 : 0
                             ]
                         });
                     }
@@ -1000,6 +1052,7 @@ const app = createApp({
             dragStart, dragOver, drop, draggedIndex, dropTargetIndex,
 
             showTranslationsFor, translations, unsavedChanges, bulkInput, selectedLanguageId, selectedLanguageCode, selectedLanguageName, categoryMeta,
+            showBulkArea, toggleBulkArea,
             viewTranslations, closeTranslations, processBulkTranslations, getLineNumbers,
             addTranslationRow, removeTranslationRow, toggleEditTranslation, copySql, sortTranslations, saveTranslations, saveCategoryMeta
         };

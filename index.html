@@ -311,6 +311,10 @@
                                 </div>
                             </div>
                             <div class="flex items-center gap-3">
+                                <button @click="toggleBulkArea" class="text-xs bg-amber-50 text-amber-700 hover:bg-amber-100 px-3 py-1.5 rounded font-medium border border-amber-200 flex items-center gap-1">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path></svg>
+                                    {{ showBulkArea ? 'Hide Bulk Edit' : 'Show Bulk Edit' }}
+                                </button>
                                 <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Language:</span>
                                 <div class="bg-white px-3 py-1.5 rounded-md border border-gray-300 shadow-sm flex items-center gap-2">
                                     <span class="text-sm font-medium text-gray-900">{{ selectedLanguageName }}</span>
@@ -335,22 +339,30 @@
 
                                     <div class="space-y-3">
                                         <div>
-                                            <label class="block text-xs font-medium text-gray-700 mb-1">Audio URL</label>
+                                            <label class="block text-xs font-medium text-gray-700 mb-1">Audio URL (Remote)</label>
                                             <div class="flex gap-1">
-                                                <input v-model="categoryMeta.audio_url" type="url" class="flex-1 px-2 py-1 border border-gray-300 rounded text-xs focus:ring-indigo-500 focus:border-indigo-500">
+                                                <input v-model="categoryMeta.audio_url" type="url" @input="unsavedChanges = true" class="flex-1 px-2 py-1 border border-gray-300 rounded text-xs focus:ring-indigo-500 focus:border-indigo-500">
                                                 <button type="button" @click="testMedia(categoryMeta.audio_url, 'audio')" class="bg-gray-100 border border-gray-300 px-2 py-1 rounded text-xs hover:bg-gray-200" :disabled="!categoryMeta.audio_url" title="Preview Audio">▶</button>
                                             </div>
                                         </div>
                                         <div>
-                                            <label class="block text-xs font-medium text-gray-700 mb-1">Video URL</label>
+                                            <label class="block text-xs font-medium text-gray-700 mb-1">Audio URL (Local)</label>
+                                            <input v-model="categoryMeta.local_audio_url" type="text" @input="unsavedChanges = true" class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:ring-indigo-500 focus:border-indigo-500">
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs font-medium text-gray-700 mb-1">Video URL (Remote)</label>
                                             <div class="flex gap-1">
-                                                <input v-model="categoryMeta.video_url" type="url" class="flex-1 px-2 py-1 border border-gray-300 rounded text-xs focus:ring-indigo-500 focus:border-indigo-500">
+                                                <input v-model="categoryMeta.video_url" type="url" @input="unsavedChanges = true" class="flex-1 px-2 py-1 border border-gray-300 rounded text-xs focus:ring-indigo-500 focus:border-indigo-500">
                                                 <button type="button" @click="testMedia(categoryMeta.video_url, 'video')" class="bg-gray-100 border border-gray-300 px-2 py-1 rounded text-xs hover:bg-gray-200" :disabled="!categoryMeta.video_url" title="Preview Video">▶</button>
                                             </div>
                                         </div>
                                         <div>
+                                            <label class="block text-xs font-medium text-gray-700 mb-1">Video URL (Local)</label>
+                                            <input v-model="categoryMeta.local_video_url" type="text" @input="unsavedChanges = true" class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:ring-indigo-500 focus:border-indigo-500">
+                                        </div>
+                                        <div>
                                             <label class="block text-xs font-medium text-gray-700 mb-1">Duas.org Link</label>
-                                            <input v-model="categoryMeta.duas_url" type="url" class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:ring-indigo-500 focus:border-indigo-500">
+                                            <input v-model="categoryMeta.duas_url" type="url" @input="unsavedChanges = true" class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:ring-indigo-500 focus:border-indigo-500">
                                         </div>
 
                                         <hr class="border-gray-200">
@@ -358,32 +370,32 @@
                                         <div class="grid grid-cols-2 gap-2">
                                             <div>
                                                 <label class="block text-xs font-medium text-gray-700 mb-1">Related 1 (ID)</label>
-                                                <input v-model="categoryMeta.related1" type="number" class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:ring-indigo-500 focus:border-indigo-500">
+                                                <input v-model="categoryMeta.related1" type="number" @input="unsavedChanges = true" class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:ring-indigo-500 focus:border-indigo-500">
                                             </div>
                                             <div>
                                                 <label class="block text-xs font-medium text-gray-700 mb-1">Related 2 (ID)</label>
-                                                <input v-model="categoryMeta.related2" type="number" class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:ring-indigo-500 focus:border-indigo-500">
+                                                <input v-model="categoryMeta.related2" type="number" @input="unsavedChanges = true" class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:ring-indigo-500 focus:border-indigo-500">
                                             </div>
                                         </div>
 
                                         <div class="grid grid-cols-2 gap-2">
                                             <div>
                                                 <label class="block text-xs font-medium text-gray-700 mb-1">Label 1</label>
-                                                <input v-model="categoryMeta.label1" type="text" class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:ring-indigo-500 focus:border-indigo-500">
+                                                <input v-model="categoryMeta.label1" type="text" @input="unsavedChanges = true" class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:ring-indigo-500 focus:border-indigo-500">
                                             </div>
                                             <div>
                                                 <label class="block text-xs font-medium text-gray-700 mb-1">Label 2</label>
-                                                <input v-model="categoryMeta.label2" type="text" class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:ring-indigo-500 focus:border-indigo-500">
+                                                <input v-model="categoryMeta.label2" type="text" @input="unsavedChanges = true" class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:ring-indigo-500 focus:border-indigo-500">
                                             </div>
                                         </div>
 
                                         <div>
                                             <label class="block text-xs font-medium text-gray-700 mb-1">Notify Hijri Date</label>
-                                            <input v-model="categoryMeta.notify_hijri_date" type="text" placeholder="e.g. 01-10" class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:ring-indigo-500 focus:border-indigo-500">
+                                            <input v-model="categoryMeta.notify_hijri_date" type="text" @input="unsavedChanges = true" placeholder="e.g. 01-10" class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:ring-indigo-500 focus:border-indigo-500">
                                         </div>
 
                                         <div class="flex items-center gap-2 bg-gray-50 p-2 rounded border border-gray-200">
-                                            <input v-model="categoryMeta.is_trans" type="checkbox" id="is_trans_flag" class="h-3 w-3 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded">
+                                            <input v-model="categoryMeta.is_trans" type="checkbox" id="is_trans_flag" @change="unsavedChanges = true" class="h-3 w-3 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded">
                                             <label for="is_trans_flag" class="text-xs text-gray-900 font-medium">
                                                 Has Transliteration (is_trans)
                                             </label>
@@ -396,10 +408,20 @@
                             <div class="lg:col-span-3 space-y-6">
 
                                 <!-- Bulk Input Area -->
-                                <div class="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+                                <div v-if="showBulkArea" class="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
                                     <div class="flex justify-between items-center mb-3">
                                         <h3 class="text-sm font-semibold text-gray-700 uppercase tracking-wider">Bulk Paste Area</h3>
-                                        <p class="text-[10px] text-gray-500 italic">Paste text here, one line per row. Empty lines are ignored.</p>
+                                        <div class="flex items-center gap-4">
+                                            <div class="flex items-center gap-2">
+                                                <input type="radio" id="mode_replace" value="replace" v-model="bulkInput.mode" class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300">
+                                                <label for="mode_replace" class="text-xs font-medium text-gray-700">Replace Existing</label>
+                                            </div>
+                                            <div class="flex items-center gap-2">
+                                                <input type="radio" id="mode_append" value="append" v-model="bulkInput.mode" class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300">
+                                                <label for="mode_append" class="text-xs font-medium text-gray-700">Append to Existing</label>
+                                            </div>
+                                        </div>
+                                        <p class="text-[10px] text-gray-500 italic">Paste text here, one line per row. Empty lines map to NULL.</p>
                                     </div>
 
                                     <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
@@ -664,7 +686,7 @@
                                     <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Media URLs</h4>
 
                                     <div class="mb-3">
-                                        <label class="block text-sm font-medium text-gray-700 mb-1">Audio URL</label>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Audio URL (Remote)</label>
                                         <div class="flex gap-2">
                                             <input v-model="editingCategory.audio_url" type="url" class="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500">
                                             <button type="button" @click="testMedia(editingCategory.audio_url, 'audio')" class="bg-gray-100 border border-gray-300 px-3 py-2 rounded text-sm hover:bg-gray-200" :disabled="!editingCategory.audio_url">Test</button>
@@ -672,16 +694,53 @@
                                     </div>
 
                                     <div class="mb-3">
-                                        <label class="block text-sm font-medium text-gray-700 mb-1">Video URL</label>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Audio URL (Local)</label>
+                                        <input v-model="editingCategory.local_audio_url" type="text" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500">
+                                    </div>
+
+                                    <div class="mb-3">
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Video URL (Remote)</label>
                                         <div class="flex gap-2">
                                             <input v-model="editingCategory.video_url" type="url" class="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500">
                                             <button type="button" @click="testMedia(editingCategory.video_url, 'video')" class="bg-gray-100 border border-gray-300 px-3 py-2 rounded text-sm hover:bg-gray-200" :disabled="!editingCategory.video_url">Test</button>
                                         </div>
                                     </div>
 
-                                    <div>
+                                    <div class="mb-3">
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Video URL (Local)</label>
+                                        <input v-model="editingCategory.local_video_url" type="text" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500">
+                                    </div>
+
+                                    <div class="mb-3">
                                         <label class="block text-sm font-medium text-gray-700 mb-1">Duas.org Link</label>
                                         <input v-model="editingCategory.duas_url" type="url" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500">
+                                    </div>
+
+                                    <div class="grid grid-cols-2 gap-4 mb-3">
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">Related 1 (ID)</label>
+                                            <input v-model="editingCategory.related1" type="number" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500">
+                                        </div>
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">Related 2 (ID)</label>
+                                            <input v-model="editingCategory.related2" type="number" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500">
+                                        </div>
+                                    </div>
+
+                                    <div class="grid grid-cols-2 gap-4 mb-3">
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">Label 1</label>
+                                            <input v-model="editingCategory.label1" type="text" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500">
+                                        </div>
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">Label 2</label>
+                                            <input v-model="editingCategory.label2" type="text" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500">
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Notify Hijri Date</label>
+                                        <input v-model="editingCategory.notify_hijri_date" type="text" placeholder="e.g. 01-10" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500">
                                     </div>
                                 </div>
 
