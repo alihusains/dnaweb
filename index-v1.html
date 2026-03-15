@@ -8,6 +8,16 @@
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- libSQL Client (Turso) -->
+    <script type="importmap">
+        {
+            "imports": {
+                "@libsql/client": "https://esm.sh/@libsql/client@0.17.0/web"
+            }
+        }
+    </script>
+    <!-- Hybrid Configuration -->
+    <script src="config.js"></script>
     <!-- Custom Styles -->
     <link rel="stylesheet" href="styles.css">
 </head>
@@ -499,8 +509,8 @@
                                                     </td>
                                                     <!-- TRANSLITERATION -->
                                                     <td class="px-4 py-2 border-l border-gray-100 align-top">
-                                                        <textarea v-if="row.isEditing" v-model="row.transliteration" @input="unsavedChanges = true" rows="3" class="w-full text-sm inline-input resize-y"></textarea>
-                                                        <div v-else class="text-sm whitespace-pre-wrap text-gray-700 leading-relaxed">{{ row.transliteration }}</div>
+                                                        <textarea v-if="row.isEditing" v-model="row.transliteration" @input="unsavedChanges = true" rows="3" class="w-full text-sm font-transliteration inline-input resize-y"></textarea>
+                                                        <div v-else class="text-sm font-transliteration whitespace-pre-wrap text-gray-700 leading-relaxed">{{ row.transliteration }}</div>
                                                     </td>
                                                     <!-- TRANSLATION -->
                                                     <td class="px-4 py-2 border-l border-gray-100 align-top">
@@ -573,6 +583,7 @@
                         </table>
                     </div>
                 </div>
+            </div>
 
         </main>
 
@@ -664,7 +675,7 @@
                                     <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Media URLs</h4>
 
                                     <div class="mb-3">
-                                        <label class="block text-sm font-medium text-gray-700 mb-1">Audio URL (Remote)</label>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Audio URL</label>
                                         <div class="flex gap-2">
                                             <input v-model="editingCategory.audio_url" type="url" class="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500">
                                             <button type="button" @click="testMedia(editingCategory.audio_url, 'audio')" class="bg-gray-100 border border-gray-300 px-3 py-2 rounded text-sm hover:bg-gray-200" :disabled="!editingCategory.audio_url">Test</button>
@@ -672,60 +683,16 @@
                                     </div>
 
                                     <div class="mb-3">
-                                        <label class="block text-sm font-medium text-gray-700 mb-1">Audio URL (Local)</label>
-                                        <input v-model="editingCategory.local_audio_url" type="text" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500">
-                                    </div>
-
-                                    <div class="mb-3">
-                                        <label class="block text-sm font-medium text-gray-700 mb-1">Video URL (Remote)</label>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Video URL</label>
                                         <div class="flex gap-2">
                                             <input v-model="editingCategory.video_url" type="url" class="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500">
                                             <button type="button" @click="testMedia(editingCategory.video_url, 'video')" class="bg-gray-100 border border-gray-300 px-3 py-2 rounded text-sm hover:bg-gray-200" :disabled="!editingCategory.video_url">Test</button>
                                         </div>
                                     </div>
 
-                                    <div class="mb-3">
-                                        <label class="block text-sm font-medium text-gray-700 mb-1">Video URL (Local)</label>
-                                        <input v-model="editingCategory.local_video_url" type="text" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500">
-                                    </div>
-
-                                    <div class="mb-3">
+                                    <div>
                                         <label class="block text-sm font-medium text-gray-700 mb-1">Duas.org Link</label>
                                         <input v-model="editingCategory.duas_url" type="url" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500">
-                                    </div>
-
-                                    <div class="grid grid-cols-2 gap-4 mb-3">
-                                        <div>
-                                            <label class="block text-sm font-medium text-gray-700 mb-1">Related 1 (ID)</label>
-                                            <input v-model="editingCategory.related1" type="number" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500">
-                                        </div>
-                                        <div>
-                                            <label class="block text-sm font-medium text-gray-700 mb-1">Related 2 (ID)</label>
-                                            <input v-model="editingCategory.related2" type="number" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500">
-                                        </div>
-                                    </div>
-
-                                    <div class="grid grid-cols-2 gap-4 mb-3">
-                                        <div>
-                                            <label class="block text-sm font-medium text-gray-700 mb-1">Label 1</label>
-                                            <input v-model="editingCategory.label1" type="text" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500">
-                                        </div>
-                                        <div>
-                                            <label class="block text-sm font-medium text-gray-700 mb-1">Label 2</label>
-                                            <input v-model="editingCategory.label2" type="text" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500">
-                                        </div>
-                                    </div>
-
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-1">Notify Hijri Date</label>
-                                        <input v-model="editingCategory.notify_hijri_date" type="text" placeholder="e.g. 01-10" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500">
-                                    </div>
-
-                                    <div class="mt-3 flex items-center gap-2 bg-gray-50 p-2 rounded border border-gray-200">
-                                        <input v-model="editingCategory.is_trans" type="checkbox" id="modal_is_trans_flag" class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded">
-                                        <label for="modal_is_trans_flag" class="text-sm text-gray-900 font-medium">
-                                            Has Transliteration (is_trans)
-                                        </label>
                                     </div>
                                 </div>
 
@@ -845,7 +812,6 @@
     </div>
 
     <!-- Application Logic -->
-    <script src="config.js"></script>
-    <script src="app.js"></script>
+    <script src="app.js" type="module"></script>
 </body>
 </html>

@@ -1,3 +1,5 @@
+import { createClient } from '@libsql/client';
+
 const { createApp, ref, reactive, onMounted, computed, watch } = Vue;
 
 const app = createApp({
@@ -10,106 +12,7 @@ const app = createApp({
         const currentUser = ref(null);
         const isLoading = ref(false);
         const error = ref(null);
-
-        // Navigation & UI State
-        const currentView = ref('categories');
-        const users = ref([]);
-        const showUserModal = ref(false);
-        const editingUser = ref({ id: null, email: '', password: '', role: 'editor' });
-        const categories = ref([]);
-        const breadcrumbs = ref([]);
-        const currentCategory = ref(null);
-
-        // --- Database Helpers (Replacement for @libsql/client) ---
-        const mapArgs = (args) => {
-            if (!args) return [];
-            return args.map(arg => {
-                if (arg === null) return { type: 'null', value: null };
-                if (typeof arg === 'number') return { type: 'integer', value: String(arg) };
-                if (typeof arg === 'boolean') return { type: 'integer', value: arg ? '1' : '0' };
-                return { type: 'text', value: String(arg) };
-            });
-        };
-
-        const dbRequest = async (requests) => {
-            let url = dbUrl.value.replace('libsql://', 'https://');
-            if (url.endsWith('/')) url = url.slice(0, -1);
-            if (!url.endsWith('/v2/pipeline')) url += '/v2/pipeline';
-
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${authToken.value}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ requests })
-            });
-
-            if (!response.ok) {
-                const text = await response.text();
-                throw new Error(`HTTP ${response.status}: ${text}`);
-            }
-
-            const data = await response.json();
-            if (data.error) throw new Error(data.error.message || data.error);
-            return data.results;
-        };
-
-        const dbExecute = async (sqlOrConfig) => {
-            const sql = typeof sqlOrConfig === 'string' ? sqlOrConfig : sqlOrConfig.sql;
-            const args = typeof sqlOrConfig === 'string' ? [] : (sqlOrConfig.args || []);
-
-            const requests = [
-                {
-                    type: 'execute',
-                    stmt: {
-                        sql,
-                        args: mapArgs(args)
-                    }
-                },
-                { type: 'close' }
-            ];
-
-            const results = await dbRequest(requests);
-            const execResult = results[0];
-
-            if (execResult.type === 'error') throw new Error(execResult.error.message);
-
-            const result = execResult.response.result;
-            if (!result || !result.cols) return { rows: [], columns: [] };
-
-            const rows = result.rows.map(row => {
-                const obj = {};
-                result.cols.forEach((col, i) => {
-                    const val = row[i];
-                    // Turso values can be objects with a 'value' property
-                    obj[col.name] = (val && typeof val === 'object' && 'value' in val) ? val.value : val;
-                });
-                return obj;
-            });
-
-            return { rows };
-        };
-
-        const dbBatch = async (stmts) => {
-            const requests = stmts.map(s => ({
-                type: 'execute',
-                stmt: {
-                    sql: s.sql,
-                    args: mapArgs(s.args)
-                }
-            }));
-            requests.push({ type: 'close' });
-
-            const results = await dbRequest(requests);
-
-            // Check for errors in any result
-            for (const res of results) {
-                if (res.type === 'error') throw new Error(res.error.message);
-            }
-
-            return results;
-        };
+        let libsqlClient = null;
 
         // Login form state
         const loginForm = reactive({
@@ -131,7 +34,7 @@ const app = createApp({
         const fetchUsers = async () => {
             if (currentUser.value?.role !== 'admin') return;
             try {
-                const result = await dbExecute('SELECT id, email, role, created_at FROM users ORDER BY created_at DESC');
+                const result = await libsqlClient.execute('SELECT id, email, role, created_at FROM users ORDER BY created_at DESC');
                 users.value = result.rows.map(row => ({
                     id: row.id,
                     email: String(row.email),
@@ -160,12 +63,12 @@ const app = createApp({
                     // Update
                     if (editingUser.value.password) {
                         const hashedPassword = await hashPassword(editingUser.value.password);
-                        await dbExecute({
+                        await libsqlClient.execute({
                             sql: 'UPDATE users SET email = ?, password_hash = ?, role = ? WHERE id = ?',
                             args: [editingUser.value.email, hashedPassword, editingUser.value.role, editingUser.value.id]
                         });
                     } else {
-                        await dbExecute({
+                        await libsqlClient.execute({
                             sql: 'UPDATE users SET email = ?, role = ? WHERE id = ?',
                             args: [editingUser.value.email, editingUser.value.role, editingUser.value.id]
                         });
@@ -174,7 +77,7 @@ const app = createApp({
                     // Insert
                     if (!editingUser.value.password) throw new Error("Password is required for new users.");
                     const hashedPassword = await hashPassword(editingUser.value.password);
-                    await dbExecute({
+                    await libsqlClient.execute({
                         sql: 'INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?)',
                         args: [editingUser.value.email, hashedPassword, editingUser.value.role]
                     });
@@ -196,7 +99,7 @@ const app = createApp({
             if (!confirm(`Delete user ${user.email}?`)) return;
             isLoading.value = true;
             try {
-                await dbExecute({
+                await libsqlClient.execute({
                     sql: 'DELETE FROM users WHERE id = ?',
                     args: [user.id]
                 });
@@ -314,8 +217,13 @@ const app = createApp({
             isLoading.value = true;
             error.value = null;
             try {
+                libsqlClient = createClient({
+                    url: dbUrl.value,
+                    authToken: authToken.value
+                });
+
                 // Test connection
-                await dbExecute('SELECT 1');
+                await libsqlClient.execute('SELECT 1');
 
                 // Save to local storage for this device
                 localStorage.setItem('tursoDbUrl', dbUrl.value);
@@ -337,7 +245,7 @@ const app = createApp({
             error.value = null;
             try {
                 const hashedPassword = await hashPassword(loginForm.password);
-                const result = await dbExecute({
+                const result = await libsqlClient.execute({
                     sql: 'SELECT * FROM users WHERE email = ? AND password_hash = ?',
                     args: [loginForm.email, hashedPassword]
                 });
@@ -374,6 +282,7 @@ const app = createApp({
             isLoggedIn.value = false;
             currentUser.value = null;
             localStorage.removeItem('cmsUser');
+            localStorage.removeItem('cmsSessionExpiry');
             categories.value = [];
             breadcrumbs.value = [];
             currentCategory.value = null;
@@ -383,7 +292,7 @@ const app = createApp({
         const disconnectDb = () => {
             logout();
             isDbConnected.value = false;
-            // Disconnect (no-op now)
+            libsqlClient = null;
             localStorage.removeItem('tursoDbUrl');
             localStorage.removeItem('tursoAuthToken');
         };
@@ -391,12 +300,12 @@ const app = createApp({
         // --- Languages Management ---
         const fetchLanguages = async () => {
             try {
-                const result = await dbExecute('SELECT * FROM languages ORDER BY id ASC');
+                const result = await libsqlClient.execute('SELECT * FROM languages ORDER BY id ASC');
                 languages.value = result.rows.map(row => ({
                     id: row.id,
                     code: String(row.code),
                     name: String(row.name),
-                    is_rtl: !!row.is_rtl
+                    is_rtl: row.is_rtl === 1
                 }));
                 if (languages.value.length > 0 && !selectedLanguageId.value) {
                     selectedLanguageId.value = languages.value[0].id;
@@ -425,12 +334,12 @@ const app = createApp({
             try {
                 const isRtl = editingLanguage.value.is_rtl ? 1 : 0;
                 if (editingLanguage.value.id) {
-                    await dbExecute({
+                    await libsqlClient.execute({
                         sql: `UPDATE languages SET code = ?, name = ?, is_rtl = ? WHERE id = ?`,
                         args: [editingLanguage.value.code, editingLanguage.value.name, isRtl, editingLanguage.value.id]
                     });
                 } else {
-                    await dbExecute({
+                    await libsqlClient.execute({
                         sql: `INSERT INTO languages (code, name, is_rtl) VALUES (?, ?, ?)`,
                         args: [editingLanguage.value.code, editingLanguage.value.name, isRtl]
                     });
@@ -448,8 +357,8 @@ const app = createApp({
             if (!confirm(`Are you sure you want to delete the language '${lang.name}'?`)) return;
             isLoading.value = true;
             try {
-                await dbExecute('PRAGMA foreign_keys = ON');
-                await dbExecute({
+                await libsqlClient.execute('PRAGMA foreign_keys = ON');
+                await libsqlClient.execute({
                     sql: 'DELETE FROM languages WHERE id = ?',
                     args: [lang.id]
                 });
@@ -468,12 +377,12 @@ const app = createApp({
             try {
                 let result;
                 if (parentId === null) {
-                    result = await dbExecute({
+                    result = await libsqlClient.execute({
                         sql: 'SELECT * FROM categories WHERE parent_id IS NULL AND language_code = ? ORDER BY sequence ASC',
                         args: [selectedLanguageCode.value]
                     });
                 } else {
-                    result = await dbExecute({
+                    result = await libsqlClient.execute({
                         sql: 'SELECT * FROM categories WHERE parent_id = ? AND language_code = ? ORDER BY sequence ASC',
                         args: [parentId, selectedLanguageCode.value]
                     });
@@ -495,8 +404,8 @@ const app = createApp({
                     notify_hijri_date: row.notify_hijri_date == null ? '' : String(row.notify_hijri_date),
                     label1: row.label1 == null ? '' : String(row.label1),
                     label2: row.label2 == null ? '' : String(row.label2),
-                    is_trans: Number(row.is_trans) === 1,
-                    is_last_level: Number(row.is_last_level) === 1,
+                    is_trans: row.is_trans,
+                    is_last_level: row.is_last_level === 1,
                     language_code: row.language_code
                 }));
             } catch (err) {
@@ -544,7 +453,6 @@ const app = createApp({
                     notify_hijri_date: category.notify_hijri_date == null ? '' : String(category.notify_hijri_date),
                     label1: category.label1 == null ? '' : String(category.label1),
                     label2: category.label2 == null ? '' : String(category.label2),
-                    is_trans: category.is_trans || 0,
                     is_last_level: category.is_last_level,
                     language_code: category.language_code || selectedLanguageCode.value
                 };
@@ -561,7 +469,6 @@ const app = createApp({
                     english_name: '',
                     audio_url: '', video_url: '', duas_url: '', local_audio_url: '', local_video_url: '',
                     related1: null, related2: null, notify_hijri_date: '', label1: '', label2: '',
-                    is_trans: 0,
                     is_last_level: false,
                     language_code: selectedLanguageCode.value
                 };
@@ -580,13 +487,13 @@ const app = createApp({
                 const isLeaf = editingCategory.value.is_last_level ? 1 : 0;
 
                 if (editingCategory.value.id) {
-                    await dbExecute({
+                    await libsqlClient.execute({
                         sql: `UPDATE categories SET
                                 lang_name = ?, english_name = ?,
                                 audio_url = ?, video_url = ?, duas_url = ?,
                                 local_audio_url = ?, local_video_url = ?,
                                 related1 = ?, related2 = ?, notify_hijri_date = ?, label1 = ?, label2 = ?,
-                                is_last_level = ?, is_trans = ?, language_code = ?
+                                is_last_level = ?, language_code = ?
                               WHERE id = ?`,
                         args: [
                             editingCategory.value.lang_name,
@@ -602,16 +509,15 @@ const app = createApp({
                             editingCategory.value.label1 || null,
                             editingCategory.value.label2 || null,
                             isLeaf,
-                            editingCategory.value.is_trans ? 1 : 0,
                             editingCategory.value.language_code,
                             editingCategory.value.id
                         ]
                     });
                 } else {
-                    await dbExecute({
+                    await libsqlClient.execute({
                         sql: `INSERT INTO categories
                                 (parent_id, sequence, lang_name, english_name, audio_url, video_url, duas_url, local_audio_url, local_video_url, related1, related2, notify_hijri_date, label1, label2, is_last_level, is_trans, language_code)
-                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
                         args: [
                             editingCategory.value.parent_id,
                             editingCategory.value.sequence,
@@ -628,19 +534,12 @@ const app = createApp({
                             editingCategory.value.label1 || null,
                             editingCategory.value.label2 || null,
                             isLeaf,
-                            editingCategory.value.is_trans ? 1 : 0,
                             editingCategory.value.language_code
                         ]
                     });
                 }
 
                 closeCategoryModal();
-
-                // Sync with translation view if needed
-                if (showTranslationsFor.value && showTranslationsFor.value.id === editingCategory.value.id) {
-                    categoryMeta.value.is_trans = editingCategory.value.is_trans ? 1 : 0;
-                }
-
                 await fetchCategories(currentCategory.value ? currentCategory.value.id : null);
             } catch (err) {
                 error.value = "Failed to save category: " + err.message;
@@ -655,8 +554,8 @@ const app = createApp({
             }
             isLoading.value = true;
             try {
-                await dbExecute('PRAGMA foreign_keys = ON');
-                await dbExecute({
+                await libsqlClient.execute('PRAGMA foreign_keys = ON');
+                await libsqlClient.execute({
                     sql: 'DELETE FROM categories WHERE id = ?',
                     args: [category.id]
                 });
@@ -686,7 +585,7 @@ const app = createApp({
             dropTargetIndex.value = index;
         };
 
-        const drop = async () => {
+        const drop = async (event) => {
             const fromIndex = draggedIndex.value;
             const toIndex = dropTargetIndex.value;
 
@@ -708,7 +607,7 @@ const app = createApp({
                     sql: 'UPDATE categories SET sequence = ? WHERE id = ?',
                     args: [cat.sequence, cat.id]
                 }));
-                await dbBatch(stmts);
+                await libsqlClient.batch(stmts);
 
                 // Sort the categories array based on the new sequence to reflect it instantly
                 categories.value.sort((a, b) => a.sequence - b.sequence);
@@ -761,7 +660,7 @@ const app = createApp({
             error.value = null;
 
             try {
-                const result = await dbExecute({
+                const result = await libsqlClient.execute({
                     sql: 'SELECT * FROM item_translations WHERE category_id = ? ORDER BY sequence ASC',
                     args: [showTranslationsFor.value.id]
                 });
@@ -799,7 +698,7 @@ const app = createApp({
             isLoading.value = true;
             error.value = null;
             try {
-                await dbExecute({
+                await libsqlClient.execute({
                     sql: `UPDATE categories SET
                             audio_url = ?, video_url = ?, duas_url = ?,
                             related1 = ?, related2 = ?, notify_hijri_date = ?, label1 = ?, label2 = ?,
@@ -981,7 +880,7 @@ const app = createApp({
                     args: [hasTransliteration ? 1 : 0, catId]
                 });
 
-                await dbBatch(stmts);
+                await libsqlClient.batch(stmts);
 
                 unsavedChanges.value = false;
                 deletedTranslationIds.value = [];
