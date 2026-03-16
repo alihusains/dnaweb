@@ -1,3 +1,5 @@
+import { createClient } from 'https://esm.sh/@libsql/client/web';
+
 const { createApp, ref, reactive, onMounted, computed, watch } = Vue;
 
 const app = createApp({
@@ -10,112 +12,18 @@ const app = createApp({
         const currentUser = ref(null);
         const isLoading = ref(false);
         const error = ref(null);
+        let libsqlClient = null;
 
-        // Navigation & UI State
-        const currentView = ref('categories');
-        const users = ref([]);
-        const showUserModal = ref(false);
-        const editingUser = ref({ id: null, email: '', password: '', role: 'editor', github_token: '' });
-        const categories = ref([]);
-        const breadcrumbs = ref([]);
-        const currentCategory = ref(null);
-
-        // --- Database Helpers (Replacement for @libsql/client) ---
-        const mapArgs = (args) => {
-            if (!args) return [];
-            return args.map(arg => {
-                if (arg === null) return { type: 'null', value: null };
-                if (typeof arg === 'number') return { type: 'integer', value: String(arg) };
-                if (typeof arg === 'boolean') return { type: 'integer', value: arg ? '1' : '0' };
-                return { type: 'text', value: String(arg) };
-            });
-        };
-
-        const dbRequest = async (requests) => {
-            let url = dbUrl.value.replace('libsql://', 'https://');
-            if (url.endsWith('/')) url = url.slice(0, -1);
-            if (!url.endsWith('/v2/pipeline')) url += '/v2/pipeline';
-
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${authToken.value}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ requests })
-            });
-
-            if (!response.ok) {
-                const text = await response.text();
-                throw new Error(`HTTP ${response.status}: ${text}`);
-            }
-
-            const data = await response.json();
-            if (data.error) throw new Error(data.error.message || data.error);
-            return data.results;
-        };
-
-        const dbExecute = async (sqlOrConfig) => {
-            const sql = typeof sqlOrConfig === 'string' ? sqlOrConfig : sqlOrConfig.sql;
-            const args = typeof sqlOrConfig === 'string' ? [] : (sqlOrConfig.args || []);
-
-            const requests = [
-                {
-                    type: 'execute',
-                    stmt: {
-                        sql,
-                        args: mapArgs(args)
-                    }
-                },
-                { type: 'close' }
-            ];
-
-            const results = await dbRequest(requests);
-            const execResult = results[0];
-
-            if (execResult.type === 'error') throw new Error(execResult.error.message);
-
-            const result = execResult.response.result;
-            if (!result || !result.cols) return { rows: [], columns: [] };
-
-            const rows = result.rows.map(row => {
-                const obj = {};
-                result.cols.forEach((col, i) => {
-                    const val = row[i];
-                    // Turso values can be objects with a 'value' property
-                    obj[col.name] = (val && typeof val === 'object' && 'value' in val) ? val.value : val;
-                });
-                return obj;
-            });
-
-            return { rows };
+        // DB Wrappers for consistent error handling and client check
+        const dbExecute = async (stmt) => {
+            if (!libsqlClient) throw new Error("Database not connected");
+            return await libsqlClient.execute(stmt);
         };
 
         const dbBatch = async (stmts) => {
-            const requests = stmts.map(s => ({
-                type: 'execute',
-                stmt: {
-                    sql: s.sql,
-                    args: mapArgs(s.args)
-                }
-            }));
-            requests.push({ type: 'close' });
-
-            const results = await dbRequest(requests);
-
-            // Check for errors in any result
-            for (const res of results) {
-                if (res.type === 'error') throw new Error(res.error.message);
-            }
-
-            return results;
+            if (!libsqlClient) throw new Error("Database not connected");
+            return await libsqlClient.batch(stmts);
         };
-
-        // Login form state
-        const loginForm = reactive({
-            email: '',
-            password: ''
-        });
 
         // Hashing helper
         const hashPassword = async (password) => {
@@ -126,8 +34,126 @@ const app = createApp({
             return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
         };
 
-        // Navigation State
-        // --- User Management ---
+        // Navigation & UI State
+        const currentView = ref('categories');
+        const users = ref([]);
+        const showUserModal = ref(false);
+        const editingUser = ref({ id: null, email: '', password: '', role: 'editor', github_token: '' });
+        const categories = ref([]);
+        const breadcrumbs = ref([]);
+        const currentCategory = ref(null);
+
+        // --- Missing State ---
+        const languages = ref([]);
+        const selectedLanguageId = ref(null);
+        const selectedLanguageCode = computed(() => {
+            const lang = languages.value.find(l => l.id === selectedLanguageId.value);
+            return lang ? lang.code : 'en';
+        });
+        const selectedLanguageName = computed(() => {
+            const lang = languages.value.find(l => l.id === selectedLanguageId.value);
+            return lang ? lang.name : 'English';
+        });
+        const editingLanguage = ref({ id: null, code: '', name: '', is_rtl: false });
+        const showLanguageModal = ref(false);
+
+        const showCategoryModal = ref(false);
+        const editingCategory = ref({});
+        const mediaTestUrl = ref('');
+        const mediaTestType = ref('');
+        const showExportModal = ref(false);
+
+        const draggedIndex = ref(null);
+        const dropTargetIndex = ref(null);
+
+        const showTranslationsFor = ref(null);
+        const translations = ref([]);
+        const unsavedChanges = ref(false);
+        const deletedTranslationIds = ref([]);
+        const bulkInput = reactive({ arabic: '', transliteration: '', translation: '' });
+        const categoryMeta = ref({
+            audio_url: '', video_url: '', duas_url: '', is_trans: false,
+            related1: null, related2: null, notify_hijri_date: '',
+            label1: '', label2: ''
+        });
+
+        const availableTables = ref([]);
+        const githubToken = ref(localStorage.getItem('githubToken') || '');
+        const dbSharingSettings = reactive({
+            selectedTables: [],
+            configName: 'default',
+            autoIncrement: true,
+            manualVersion: '',
+            triggerMethod: 'api',
+            backupMode: false
+        });
+        const dbSharingPresets = ref(JSON.parse(localStorage.getItem('dbSharingPresets') || '[]'));
+        const latestPublishedDb = ref(null);
+        const publishedReleases = ref([]);
+        const currentDbVersion = ref('1.00');
+
+        const loginForm = reactive({ email: '', password: '' });
+
+        const connectDb = async () => {
+            isLoading.value = true;
+            error.value = null;
+            try {
+                libsqlClient = createClient({
+                    url: dbUrl.value,
+                    authToken: authToken.value
+                });
+                await libsqlClient.execute('SELECT 1');
+                localStorage.setItem('tursoDbUrl', dbUrl.value);
+                localStorage.setItem('tursoAuthToken', authToken.value);
+                isDbConnected.value = true;
+                return true;
+            } catch (err) {
+                error.value = "Connection failed: " + err.message;
+                isDbConnected.value = false;
+                return false;
+            } finally {
+                isLoading.value = false;
+            }
+        };
+
+        const userLogin = async () => {
+            isLoading.value = true;
+            error.value = null;
+            try {
+                const hashedPassword = await hashPassword(loginForm.password);
+                const result = await dbExecute({
+                    sql: 'SELECT * FROM users WHERE email = ? AND password_hash = ?',
+                    args: [loginForm.email, hashedPassword]
+                });
+
+                if (result.rows.length > 0) {
+                    const user = result.rows[0];
+                    currentUser.value = {
+                        id: user.id,
+                        email: String(user.email),
+                        role: String(user.role),
+                        github_token: user.github_token ? String(user.github_token) : ''
+                    };
+                    isLoggedIn.value = true;
+                    if (currentUser.value.github_token) githubToken.value = currentUser.value.github_token;
+
+                    const expiry = Date.now() + (48 * 60 * 60 * 1000);
+                    localStorage.setItem('cmsUser', JSON.stringify(currentUser.value));
+                    localStorage.setItem('cmsSessionExpiry', expiry.toString());
+                    loginForm.password = '';
+
+                    await fetchLanguages();
+                    await syncRoute();
+                } else {
+                    error.value = "Invalid email or password.";
+                }
+            } catch (err) {
+                error.value = "Login error: " + err.message;
+            } finally {
+                isLoading.value = false;
+            }
+        };
+
         const fetchUsers = async () => {
             if (currentUser.value?.role !== 'admin') return;
             try {
@@ -158,7 +184,6 @@ const app = createApp({
             error.value = null;
             try {
                 if (editingUser.value.id) {
-                    // Update
                     if (editingUser.value.password) {
                         const hashedPassword = await hashPassword(editingUser.value.password);
                         await dbExecute({
@@ -172,7 +197,6 @@ const app = createApp({
                         });
                     }
                 } else {
-                    // Insert
                     if (!editingUser.value.password) throw new Error("Password is required for new users.");
                     const hashedPassword = await hashPassword(editingUser.value.password);
                     await dbExecute({
@@ -182,15 +206,6 @@ const app = createApp({
                 }
                 showUserModal.value = false;
                 await fetchUsers();
-
-                // If editing self, update current session
-                if (editingUser.value.id === currentUser.value?.id) {
-                    currentUser.value.email = editingUser.value.email;
-                    currentUser.value.role = editingUser.value.role;
-                    currentUser.value.github_token = editingUser.value.github_token;
-                    githubToken.value = editingUser.value.github_token;
-                    localStorage.setItem('cmsUser', JSON.stringify(currentUser.value));
-                }
             } catch (err) {
                 error.value = "Failed to save user: " + err.message;
             } finally {
@@ -199,17 +214,14 @@ const app = createApp({
         };
 
         const deleteUser = async (user) => {
-            if (user.id === currentUser.value.id) {
+            if (user.id === currentUser.value?.id) {
                 alert("You cannot delete yourself.");
                 return;
             }
             if (!confirm(`Delete user ${user.email}?`)) return;
             isLoading.value = true;
             try {
-                await dbExecute({
-                    sql: 'DELETE FROM users WHERE id = ?',
-                    args: [user.id]
-                });
+                await dbExecute({ sql: 'DELETE FROM users WHERE id = ?', args: [user.id] });
                 await fetchUsers();
             } catch (err) {
                 error.value = "Failed to delete user: " + err.message;
@@ -218,199 +230,161 @@ const app = createApp({
             }
         };
 
-        // Languages State
-        const languages = ref([]);
-        const showLanguageModal = ref(false);
-        const editingLanguage = ref({
-            id: null, code: '', name: '', is_rtl: 0
-        });
+        const syncRoute = async () => {
+            if (!isLoggedIn.value) return;
 
-        // Edit Modal State
-        const showCategoryModal = ref(false);
-        const editingCategory = ref({
-            id: null, parent_id: null, sequence: 0, lang_name: '', english_name: '',
-            audio_url: '', video_url: '', duas_url: '', local_audio_url: '', local_video_url: '',
-            related1: null, related2: null, notify_hijri_date: '', label1: '', label2: '',
-            is_last_level: false, language_code: ''
-        });
+            const hash = window.location.hash.replace(/^#\/?/, "");
+            const parts = hash.split("/");
+            const view = parts[0] || "categories";
+            const id = parts[1];
 
-        // Media Test Modal State
-        const mediaTestUrl = ref(null);
-        const mediaTestType = ref(null); // 'audio' or 'video'
+            // Helper to rebuild breadcrumbs and set current category
+            const restoreCategoryState = async (catId) => {
+                if (!catId) return null;
+                try {
+                    const res = await dbExecute({
+                        sql: "SELECT * FROM categories WHERE id = ?",
+                        args: [catId],
+                    });
+                    if (res.rows.length > 0) {
+                        const cat = res.rows[0];
+                        currentCategory.value = cat;
 
-        // Export Modal
-        const showExportModal = ref(false);
+                        const crumbs = [];
+                        crumbs.unshift({ id: cat.id, english_name: cat.english_name });
+                        let parentId = cat.parent_id;
 
-        // Drag and Drop State
-        const draggedIndex = ref(null);
-        const dropTargetIndex = ref(null);
+                        while (parentId) {
+                            const pRes = await dbExecute({
+                                sql: "SELECT id, parent_id, english_name FROM categories WHERE id = ?",
+                                args: [parentId],
+                            });
+                            if (pRes.rows.length > 0) {
+                                const p = pRes.rows[0];
+                                crumbs.unshift({ id: p.id, english_name: p.english_name });
+                                parentId = p.parent_id;
+                            } else {
+                                parentId = null;
+                            }
+                        }
+                        breadcrumbs.value = crumbs;
+                        return cat;
+                    }
+                } catch (e) {
+                    console.error("Failed to restore category state:", e);
+                }
+                return null;
+            };
 
-        // Translation Content State
-        const showTranslationsFor = ref(null);
-        const translations = ref([]);
-        const deletedTranslationIds = ref([]);
-        const selectedLanguageId = ref(null);
-        const unsavedChanges = ref(false);
+            // Avoid redundant navigation if state matches hash
+            if (currentView.value === view &&
+                ((view !== "categories" && view !== "translations") || (currentCategory.value?.id == id && (view !== "translations" || showTranslationsFor.value)))) {
+                return;
+            }
 
-        const selectedLanguageCode = computed(() => {
-            const lang = languages.value.find(l => l.id === selectedLanguageId.value);
-            return lang ? lang.code : '';
-        });
+            currentView.value = view;
 
-        const selectedLanguageName = computed(() => {
-            const lang = languages.value.find(l => l.id === selectedLanguageId.value);
-            return lang ? lang.name : 'Local';
-        });
+            if (view === "categories") {
+                showTranslationsFor.value = null;
+                if (id) {
+                    await restoreCategoryState(id);
+                    await fetchCategories(id);
+                } else {
+                    currentCategory.value = null;
+                    breadcrumbs.value = [];
+                    await fetchCategories(null);
+                }
+            } else if (view === "translations" && id) {
+                const cat = await restoreCategoryState(id);
+                if (cat) {
+                    await viewTranslations(cat, false); // false to avoid hash loop
+                }
+            } else if (view === "users") {
+                await fetchUsers();
+            } else if (view === "languages") {
+                await fetchLanguages();
+            } else if (view === "db-sharing") {
+                await fetchAvailableTables();
+                await fetchCurrentVersion();
+                await fetchReleases();
+            }
+        };
 
-        const categoryMeta = ref({
-            audio_url: '', video_url: '', duas_url: '',
-            related1: null, related2: null, notify_hijri_date: '',
-            label1: '', label2: '', is_trans: 0
-        });
+        const updateHash = (view, id = null) => {
+            const newHash = id ? `#/${view}/${id}` : `#/${view}`;
+            if (window.location.hash !== newHash) {
+                window.location.hash = newHash;
+            }
+        };
 
-        // --- Database Sharing State ---
-        const availableTables = ref([]);
-        const githubToken = ref(localStorage.getItem('githubToken') || '');
-        const dbSharingSettings = reactive({
-            selectedTables: [],
-            autoIncrement: true,
-            manualVersion: '',
-            configName: 'default',
-            backupMode: false,
-            triggerMethod: 'dispatch' // 'dispatch' or 'commit'
-        });
-        const dbSharingPresets = ref(JSON.parse(localStorage.getItem('dbSharingPresets') || '[]'));
-        const latestPublishedDb = ref({ version: '0.0', url: '', date: '' });
-        const publishedReleases = ref([]);
-
-        const currentDbVersion = ref(0);
-
-        const bulkInput = reactive({
-            arabic: '',
-            transliteration: '',
-            translation: ''
-        });
 
         // --- Lifecycle ---
         onMounted(async () => {
-            // Priority 1: window.CONFIG (GitHub Secrets / Local config.js)
+            // Restore DB config first
             if (window.CONFIG?.url && window.CONFIG?.token) {
                 dbUrl.value = window.CONFIG.url;
                 authToken.value = window.CONFIG.token;
             } else {
-                // Priority 2: LocalStorage fallback
-                const savedDbUrl = localStorage.getItem('tursoDbUrl');
-                const savedAuthToken = localStorage.getItem('tursoAuthToken');
+                dbUrl.value = localStorage.getItem('tursoDbUrl') || 'libsql://duasandaamalapp-alihusains.aws-ap-northeast-1.turso.io';
+                authToken.value = localStorage.getItem('tursoAuthToken') || '';
+            }
 
-                if (savedDbUrl && savedAuthToken) {
-                    dbUrl.value = savedDbUrl;
-                    authToken.value = savedAuthToken;
-                } else {
-                    // Default fallback URL (useful for initial clone)
-                    dbUrl.value = 'libsql://duasandaamalapp-alihusains.aws-ap-northeast-1.turso.io';
+            // Immediate session restoration (smooth UI)
+            const savedUser = localStorage.getItem('cmsUser');
+            const sessionExpiry = localStorage.getItem('cmsSessionExpiry');
+            if (savedUser && sessionExpiry && Date.now() < parseInt(sessionExpiry)) {
+                currentUser.value = JSON.parse(savedUser);
+                isLoggedIn.value = true;
+                if (currentUser.value.github_token) githubToken.value = currentUser.value.github_token;
+            } else {
+                // Clear stale session
+                localStorage.removeItem('cmsUser');
+                localStorage.removeItem('cmsSessionExpiry');
+                isLoggedIn.value = false;
+                currentUser.value = null;
+            }
+
+            // Restore language preference
+            const savedLang = localStorage.getItem('selectedLanguageId');
+            if (savedLang) selectedLanguageId.value = parseInt(savedLang);
+
+            if (dbUrl.value && authToken.value) {
+                const connected = await connectDb();
+                if (connected && isLoggedIn.value) {
+                    await fetchLanguages();
+                    // Initial sync handled below
                 }
             }
 
-            if (dbUrl.value && authToken.value) {
-                try {
-                    await connectDb();
+            if (isLoggedIn.value) {
+                await syncRoute();
+            }
 
-                    // Restore user session with 48h expiry check
-                    const savedUser = localStorage.getItem('cmsUser');
-                    const sessionExpiry = localStorage.getItem('cmsSessionExpiry');
+            window.addEventListener('hashchange', syncRoute);
+        });
 
-                    if (savedUser && sessionExpiry) {
-                        if (Date.now() < parseInt(sessionExpiry)) {
-                            currentUser.value = JSON.parse(savedUser);
-                            if (currentUser.value.github_token) {
-                                githubToken.value = currentUser.value.github_token;
-                            }
-                            isLoggedIn.value = true;
-                            await fetchLanguages();
-                            await fetchCategories(null);
-                        } else {
-                            console.log("Session expired.");
-                            logout();
-                        }
+        watch(selectedLanguageId, async (newVal) => {
+            if (newVal) {
+                localStorage.setItem('selectedLanguageId', newVal);
+                if (isLoggedIn.value) {
+                    if (currentView.value === 'translations' || showTranslationsFor.value) {
+                        await fetchTranslationsForCategoryAndLanguage();
+                    } else if (currentView.value === 'categories') {
+                        await fetchCategories(currentCategory.value ? currentCategory.value.id : null);
                     }
-                } catch (e) {
-                    console.log("Auto-connect or session restoration failed:", e);
                 }
             }
         });
 
-        // --- stage 1: Database Connection ---
-        const connectDb = async () => {
-            isLoading.value = true;
-            error.value = null;
-            try {
-                // Test connection
-                await dbExecute('SELECT 1');
+        // The hash is now the single source of truth. Side effects are handled in syncRoute.
 
-                // Save to local storage for this device
-                localStorage.setItem('tursoDbUrl', dbUrl.value);
-                localStorage.setItem('tursoAuthToken', authToken.value);
-
-                isDbConnected.value = true;
-            } catch (err) {
-                error.value = "Connection failed: " + err.message;
-                isDbConnected.value = false;
-                throw err;
-            } finally {
-                isLoading.value = false;
-            }
-        };
-
-        // --- stage 2: User Login ---
-        const userLogin = async () => {
-            isLoading.value = true;
-            error.value = null;
-            try {
-                const hashedPassword = await hashPassword(loginForm.password);
-                const result = await dbExecute({
-                    sql: 'SELECT * FROM users WHERE email = ? AND password_hash = ?',
-                    args: [loginForm.email, hashedPassword]
-                });
-
-                if (result.rows.length > 0) {
-                    const user = result.rows[0];
-                    currentUser.value = {
-                        id: user.id,
-                        email: user.email,
-                        role: user.role,
-                        github_token: user.github_token
-                    };
-                    isLoggedIn.value = true;
-
-                    // Populate GitHub token if present
-                    if (user.github_token) {
-                        githubToken.value = user.github_token;
-                    }
-
-                    // Save session to LocalStorage (48h expiry)
-                    const expiry = Date.now() + (48 * 60 * 60 * 1000);
-                    localStorage.setItem('cmsUser', JSON.stringify(currentUser.value));
-                    localStorage.setItem('cmsSessionExpiry', expiry.toString());
-
-                    // Clear password from memory
-                    loginForm.password = '';
-
-                    await fetchLanguages();
-                    await fetchCategories(null);
-                } else {
-                    error.value = "Invalid email or password.";
-                }
-            } catch (err) {
-                error.value = "Login error: " + err.message;
-            } finally {
-                isLoading.value = false;
-            }
-        };
 
         const logout = () => {
             isLoggedIn.value = false;
             currentUser.value = null;
             localStorage.removeItem('cmsUser');
+            localStorage.removeItem('cmsSessionExpiry');
+            window.location.hash = '';
             categories.value = [];
             breadcrumbs.value = [];
             currentCategory.value = null;
@@ -543,23 +517,13 @@ const app = createApp({
             }
         };
 
-        const openCategory = async (category) => {
-            breadcrumbs.value.push(category);
-            currentCategory.value = category;
-            await fetchCategories(category.id);
+        const openCategory = (category) => {
+            updateHash('categories', category.id);
         };
 
-        const goToBreadcrumb = async (index) => {
-            if (index === -1) {
-                breadcrumbs.value = [];
-                currentCategory.value = null;
-                await fetchCategories(null);
-            } else {
-                breadcrumbs.value = breadcrumbs.value.slice(0, index + 1);
-                currentCategory.value = breadcrumbs.value[index];
-                await fetchCategories(currentCategory.value.id);
-            }
-            showTranslationsFor.value = null;
+        const goToBreadcrumb = (index) => {
+            const id = index === -1 ? null : breadcrumbs.value[index].id;
+            updateHash('categories', id);
         };
 
         // --- Category CRUD ---
@@ -758,10 +722,15 @@ const app = createApp({
         };
 
         // --- Content Management (Translations & Meta) ---
-        const viewTranslations = async (category) => {
+        const viewTranslations = async (category, shouldUpdateHash = true) => {
             showTranslationsFor.value = category;
             unsavedChanges.value = false;
             deletedTranslationIds.value = [];
+
+            if (shouldUpdateHash) {
+                updateHash('translations', category.id);
+                return; // syncRoute will handle the rest
+            }
 
             bulkInput.arabic = '';
             bulkInput.transliteration = '';
@@ -827,8 +796,7 @@ const app = createApp({
                 }
             }
             showTranslationsFor.value = null;
-            // Refresh categories in case meta was updated
-            fetchCategories(currentCategory.value ? currentCategory.value.id : null);
+            updateHash('categories', currentCategory.value ? currentCategory.value.id : null);
         };
 
         const saveCategoryMeta = async () => {
@@ -900,7 +868,7 @@ const app = createApp({
                     publishedReleases.value = data.map(r => ({
                         version: r.tag_name.replace('v', ''),
                         date: new Date(r.published_at).toLocaleString(),
-                        url: r.assets.find(a => a.name.endsWith('.db'))?.browser_download_url || ''
+                        url: r.assets.find(a => a.name.endsWith('.sqlite'))?.browser_download_url || ''
                     }));
                     if (publishedReleases.value.length > 0) {
                         latestPublishedDb.value = publishedReleases.value[0];
@@ -1008,7 +976,15 @@ const app = createApp({
                         message: `chore: trigger database publish v${nextVersion} [bot]`,
                         content: btoa(configContent),
                         branch: 'main',
-                        sha: sha
+                        sha: sha,
+                        committer: {
+                            name: "github-actions[bot]",
+                            email: "github-actions[bot]@users.noreply.github.com"
+                        },
+                        author: {
+                            name: "github-actions[bot]",
+                            email: "github-actions[bot]@users.noreply.github.com"
+                        }
                     })
                 });
 
@@ -1049,14 +1025,6 @@ const app = createApp({
                 localStorage.setItem('dbSharingPresets', JSON.stringify(dbSharingPresets.value));
             }
         };
-
-        watch(currentView, (newView) => {
-            if (newView === 'db-sharing') {
-                fetchAvailableTables();
-                fetchCurrentVersion();
-                fetchReleases();
-            }
-        });
 
         watch(() => dbSharingSettings.backupMode, (val) => {
             if (!val && publishedReleases.value.length > 0) {
@@ -1271,7 +1239,7 @@ const app = createApp({
             addTranslationRow, removeTranslationRow, toggleEditTranslation, copySql, sortTranslations, saveTranslations, saveCategoryMeta,
 
             availableTables, githubToken, dbSharingSettings, dbSharingPresets, latestPublishedDb, publishedReleases, currentDbVersion,
-            triggerPublishWorkflow, savePreset, loadPreset, deletePreset, copyToClipboard
+            triggerPublishWorkflow, savePreset, loadPreset, deletePreset, copyToClipboard, updateHash
         };
     }
 });

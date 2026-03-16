@@ -23,16 +23,16 @@
                     </h1>
 
                     <nav v-if="isLoggedIn" class="hidden md:flex gap-4">
-                        <button @click="currentView = 'categories'" :class="['px-3 py-1 rounded transition text-sm font-medium', currentView === 'categories' ? 'bg-indigo-800 text-white' : 'text-indigo-200 hover:text-white hover:bg-indigo-700']">
+                        <button @click="updateHash('categories')" :class="['px-3 py-1 rounded transition text-sm font-medium', currentView === 'categories' ? 'bg-indigo-800 text-white' : 'text-indigo-200 hover:text-white hover:bg-indigo-700']">
                             Categories
                         </button>
-                        <button @click="currentView = 'languages'" :class="['px-3 py-1 rounded transition text-sm font-medium', currentView === 'languages' ? 'bg-indigo-800 text-white' : 'text-indigo-200 hover:text-white hover:bg-indigo-700']">
+                        <button @click="updateHash('languages')" :class="['px-3 py-1 rounded transition text-sm font-medium', currentView === 'languages' ? 'bg-indigo-800 text-white' : 'text-indigo-200 hover:text-white hover:bg-indigo-700']">
                             Languages
                         </button>
-                        <button v-if="currentUser?.role === 'admin'" @click="currentView = 'users'; fetchUsers()" :class="['px-3 py-1 rounded transition text-sm font-medium', currentView === 'users' ? 'bg-indigo-800 text-white' : 'text-indigo-200 hover:text-white hover:bg-indigo-700']">
+                        <button v-if="currentUser?.role === 'admin'" @click="updateHash('users')" :class="['px-3 py-1 rounded transition text-sm font-medium', currentView === 'users' ? 'bg-indigo-800 text-white' : 'text-indigo-200 hover:text-white hover:bg-indigo-700']">
                             Users
                         </button>
-                        <button v-if="currentUser?.role === 'admin'" @click="currentView = 'db-sharing'" :class="['px-3 py-1 rounded transition text-sm font-medium', currentView === 'db-sharing' ? 'bg-indigo-800 text-white' : 'text-indigo-200 hover:text-white hover:bg-indigo-700']">
+                        <button v-if="currentUser?.role === 'admin'" @click="updateHash('db-sharing')" :class="['px-3 py-1 rounded transition text-sm font-medium', currentView === 'db-sharing' ? 'bg-indigo-800 text-white' : 'text-indigo-200 hover:text-white hover:bg-indigo-700']">
                             DB Sharing
                         </button>
                     </nav>
@@ -55,16 +55,16 @@
                 </div>
             </div>
             <div v-if="isLoggedIn" class="md:hidden bg-indigo-700 px-4 py-2 flex gap-4">
-                 <button @click="currentView = 'categories'" :class="['px-3 py-1 rounded transition text-sm font-medium', currentView === 'categories' ? 'bg-indigo-900 text-white' : 'text-indigo-200 hover:text-white']">
+                 <button @click="updateHash('categories')" :class="['px-3 py-1 rounded transition text-sm font-medium', currentView === 'categories' ? 'bg-indigo-900 text-white' : 'text-indigo-200 hover:text-white']">
                     Categories
                 </button>
-                <button @click="currentView = 'languages'" :class="['px-3 py-1 rounded transition text-sm font-medium', currentView === 'languages' ? 'bg-indigo-900 text-white' : 'text-indigo-200 hover:text-white']">
+                <button @click="updateHash('languages')" :class="['px-3 py-1 rounded transition text-sm font-medium', currentView === 'languages' ? 'bg-indigo-900 text-white' : 'text-indigo-200 hover:text-white']">
                     Languages
                 </button>
-                <button v-if="currentUser?.role === 'admin'" @click="currentView = 'users'; fetchUsers()" :class="['px-3 py-1 rounded transition text-sm font-medium', currentView === 'users' ? 'bg-indigo-900 text-white' : 'text-indigo-200 hover:text-white']">
+                <button v-if="currentUser?.role === 'admin'" @click="updateHash('users')" :class="['px-3 py-1 rounded transition text-sm font-medium', currentView === 'users' ? 'bg-indigo-900 text-white' : 'text-indigo-200 hover:text-white']">
                     Users
                 </button>
-                <button v-if="currentUser?.role === 'admin'" @click="currentView = 'db-sharing'" :class="['px-3 py-1 rounded transition text-sm font-medium', currentView === 'db-sharing' ? 'bg-indigo-900 text-white' : 'text-indigo-200 hover:text-white']">
+                <button v-if="currentUser?.role === 'admin'" @click="updateHash('db-sharing')" :class="['px-3 py-1 rounded transition text-sm font-medium', currentView === 'db-sharing' ? 'bg-indigo-900 text-white' : 'text-indigo-200 hover:text-white']">
                     DB Sharing
                 </button>
             </div>
@@ -651,7 +651,7 @@
                             <!-- Publication Info -->
                             <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
                                 <h3 class="text-lg font-semibold text-gray-800 mb-4">Latest Publication</h3>
-                                <div v-if="latestPublishedDb.url" class="space-y-3">
+                                <div v-if="latestPublishedDb && latestPublishedDb.url" class="space-y-3">
                                     <div class="bg-indigo-50 p-3 rounded-lg border border-indigo-100">
                                         <div class="flex justify-between items-start mb-1">
                                             <span class="text-xs font-bold text-indigo-800">Version {{ latestPublishedDb.version }}</span>
@@ -1031,6 +1031,6 @@
 
     <!-- Application Logic -->
     <script src="config.js"></script>
-    <script src="app.js"></script>
+    <script type="module" src="app.js"></script>
 </body>
 </html>
