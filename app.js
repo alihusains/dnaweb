@@ -889,13 +889,8 @@ const app = createApp({
             if (!githubToken.value) return;
             try {
                 // Detect repo from URL (works for GitHub Pages: /owner/repo/)
-                const pathParts = window.location.pathname.split('/').filter(Boolean);
-                let owner = 'alihusains', repo = 'dnaweb';
-
-                if (pathParts.length >= 2) {
-                    owner = pathParts[0];
-                    repo = pathParts[1];
-                }
+                const owner = 'alihusains';
+                const repo = 'dnaweb';
 
                 const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/releases`, {
                     headers: { 'Authorization': `token ${githubToken.value}` }
@@ -933,13 +928,8 @@ const app = createApp({
 
             isLoading.value = true;
             try {
-                const pathParts = window.location.pathname.split('/').filter(Boolean);
-                let owner = 'alihusains', repo = 'dnaweb';
-
-                if (pathParts.length >= 2) {
-                    owner = pathParts[0];
-                    repo = pathParts[1];
-                }
+                const owner = 'alihusains';
+                const repo = 'dnaweb';
 
                 const nextVersion = dbSharingSettings.autoIncrement
                     ? (parseFloat(currentDbVersion.value) + 0.01).toFixed(2)
@@ -979,13 +969,8 @@ const app = createApp({
         const triggerViaCommit = async () => {
             isLoading.value = true;
             try {
-                const pathParts = window.location.pathname.split('/').filter(Boolean);
-                let owner = 'alihusains', repo = 'dnaweb';
-
-                if (pathParts.length >= 2) {
-                    owner = pathParts[0];
-                    repo = pathParts[1];
-                }
+                const owner = 'alihusains';
+                const repo = 'dnaweb';
 
                 const nextVersion = dbSharingSettings.autoIncrement
                     ? (parseFloat(currentDbVersion.value) + 0.01).toFixed(2)

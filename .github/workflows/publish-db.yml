@@ -105,8 +105,20 @@ jobs:
 
             // Encryption using SQLCipher CLI
             console.log(`Encrypting database...`);
+            // Ensure the source is not encrypted (it's not) and destination gets encrypted
+            // Using a more standard SQLCipher export pattern
             const encryptCmd = `sqlcipher ${tempDb} "ATTACH DATABASE '${dbName}' AS encrypted KEY '${password}'; SELECT sqlcipher_export('encrypted'); DETACH DATABASE encrypted;"`;
             execSync(encryptCmd);
+
+            // Double check if it's readable with the password
+            try {
+              const checkCmd = `sqlcipher ${dbName} "PRAGMA key = '${password}'; SELECT count(*) FROM sqlite_master;"`;
+              execSync(checkCmd);
+              console.log("Encryption verification successful.");
+            } catch (e) {
+              console.error("Encryption verification failed:", e.message);
+              throw e;
+            }
 
             if (fs.existsSync(dbName)) {
               console.log(`Successfully created encrypted database: ${dbName}`);
