@@ -890,7 +890,7 @@ const app = createApp({
             try {
                 // Detect repo from URL (works for GitHub Pages: /owner/repo/)
                 const pathParts = window.location.pathname.split('/').filter(Boolean);
-                let owner = 'alihusainsorathiya', repo = 'dnaweb';
+                let owner = 'alihusains', repo = 'dnaweb';
 
                 if (pathParts.length >= 2) {
                     owner = pathParts[0];
@@ -934,7 +934,7 @@ const app = createApp({
             isLoading.value = true;
             try {
                 const pathParts = window.location.pathname.split('/').filter(Boolean);
-                let owner = 'alihusainsorathiya', repo = 'dnaweb';
+                let owner = 'alihusains', repo = 'dnaweb';
 
                 if (pathParts.length >= 2) {
                     owner = pathParts[0];
@@ -980,7 +980,7 @@ const app = createApp({
             isLoading.value = true;
             try {
                 const pathParts = window.location.pathname.split('/').filter(Boolean);
-                let owner = 'alihusainsorathiya', repo = 'dnaweb';
+                let owner = 'alihusains', repo = 'dnaweb';
 
                 if (pathParts.length >= 2) {
                     owner = pathParts[0];
