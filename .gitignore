@@ -18,3 +18,5 @@ migration.sql
 assets/duasandaamalapp.sqlite*
 assets/migrated_database*
 "data final audio - old_content.csv"
+.code-graph/
+flutter_app_blueprint.md

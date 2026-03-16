@@ -1,0 +1,161 @@
+name: Publish Shared Database
+
+on:
+  push:
+    paths:
+      - 'db_sharing_config.json'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version of the database'
+        required: true
+      tables:
+        description: 'Comma-separated list of tables to include'
+        required: true
+      config_name:
+        description: 'Name of the configuration preset used'
+        required: false
+        default: 'default'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sqlcipher
+          npm install @libsql/client sqlite3 sqlite
+
+      - name: Create Database Generation Script
+        run: |
+          cat << 'EOF' > generate-db.mjs
+          import { createClient } from '@libsql/client';
+          import sqlite3 from 'sqlite3';
+          import { open } from 'sqlite';
+          import { execSync } from 'child_process';
+          import fs from 'fs';
+
+          async function generate() {
+            let version, tables, config_name;
+
+            // Determine if triggered by dispatch or push
+            if (process.env.GITHUB_EVENT_NAME === 'workflow_dispatch') {
+              version = process.env.INPUT_VERSION;
+              tables = process.env.INPUT_TABLES.split(',').map(t => t.trim());
+              config_name = process.env.INPUT_CONFIG_NAME || 'default';
+            } else {
+              const config = JSON.parse(fs.readFileSync('db_sharing_config.json', 'utf8'));
+              version = config.version;
+              tables = config.tables;
+              config_name = config.config_name || 'default';
+            }
+
+            const url = process.env.TURSO_URL;
+            const token = process.env.TURSO_TOKEN;
+            const password = process.env.DB_PASSWORD;
+
+            const dbName = `shia_essentials_v${version}.db`;
+            const tempDb = `temp_v${version}.db`;
+
+            console.log(`Generating version ${version} with tables: ${tables.join(', ')}`);
+
+            const localDb = await open({
+              filename: tempDb,
+              driver: sqlite3.Database
+            });
+
+            const turso = createClient({ url, authToken: token });
+
+            for (const table of tables) {
+              console.log(`Exporting table: ${table}`);
+              const schemaResult = await turso.execute(`SELECT sql FROM sqlite_master WHERE type='table' AND name='${table}'`);
+              if (schemaResult.rows.length === 0) {
+                console.warn(`Table ${table} not found!`);
+                continue;
+              }
+
+              await localDb.exec(schemaResult.rows[0].sql);
+
+              const dataResult = await turso.execute(`SELECT * FROM ${table}`);
+              if (dataResult.rows.length > 0) {
+                const columns = Object.keys(dataResult.rows[0]);
+                const placeholders = columns.map(() => '?').join(',');
+                const insertSql = `INSERT INTO ${table} (${columns.join(',')}) VALUES (${placeholders})`;
+
+                for (const row of dataResult.rows) {
+                  await localDb.run(insertSql, Object.values(row));
+                }
+              }
+            }
+
+            await localDb.close();
+            console.log(`Generated unencrypted ${tempDb}`);
+
+            // Encryption using SQLCipher CLI
+            console.log(`Encrypting database...`);
+            const encryptCmd = `sqlcipher ${tempDb} "ATTACH DATABASE '${dbName}' AS encrypted KEY '${password}'; SELECT sqlcipher_export('encrypted'); DETACH DATABASE encrypted;"`;
+            execSync(encryptCmd);
+
+            if (fs.existsSync(dbName)) {
+              console.log(`Successfully created encrypted database: ${dbName}`);
+              fs.unlinkSync(tempDb);
+
+              // Export variables for next steps
+              fs.appendFileSync(process.env.GITHUB_ENV, `DB_VERSION=${version}\n`);
+              fs.appendFileSync(process.env.GITHUB_ENV, `DB_TABLES=${tables.join(',')}\n`);
+              fs.appendFileSync(process.env.GITHUB_ENV, `DB_CONFIG_NAME=${config_name}\n`);
+              fs.appendFileSync(process.env.GITHUB_ENV, `DB_FILE=${dbName}\n`);
+            } else {
+              throw new Error("Failed to create encrypted database file");
+            }
+          }
+
+          generate().catch(err => {
+            console.error(err);
+            process.exit(1);
+          });
+          EOF
+
+      - name: Generate Database File
+        env:
+          TURSO_URL: ${{ secrets.TURSO_URL }}
+          TURSO_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          INPUT_TABLES: ${{ github.event.inputs.tables }}
+          INPUT_CONFIG_NAME: ${{ github.event.inputs.config_name }}
+        run: node generate-db.mjs
+
+      - name: Update version.json
+        run: |
+          echo "{\"version\": $DB_VERSION}" > version.json
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add version.json
+          git commit -m "chore: update database version to $DB_VERSION [bot]" || echo "No changes to version.json"
+          git push
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.DB_VERSION }}
+          name: Database Release v${{ env.DB_VERSION }}
+          body: |
+            Published shared database for ShiaEssentials.
+            Version: ${{ env.DB_VERSION }}
+            Tables included: ${{ env.DB_TABLES }}
+            Configuration: ${{ env.DB_CONFIG_NAME }}
+          files: |
+            ${{ env.DB_FILE }}

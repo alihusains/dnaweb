@@ -15,7 +15,7 @@ const app = createApp({
         const currentView = ref('categories');
         const users = ref([]);
         const showUserModal = ref(false);
-        const editingUser = ref({ id: null, email: '', password: '', role: 'editor' });
+        const editingUser = ref({ id: null, email: '', password: '', role: 'editor', github_token: '' });
         const categories = ref([]);
         const breadcrumbs = ref([]);
         const currentCategory = ref(null);
@@ -131,11 +131,12 @@ const app = createApp({
         const fetchUsers = async () => {
             if (currentUser.value?.role !== 'admin') return;
             try {
-                const result = await dbExecute('SELECT id, email, role, created_at FROM users ORDER BY created_at DESC');
+                const result = await dbExecute('SELECT id, email, role, github_token, created_at FROM users ORDER BY created_at DESC');
                 users.value = result.rows.map(row => ({
                     id: row.id,
                     email: String(row.email),
                     role: String(row.role),
+                    github_token: row.github_token ? String(row.github_token) : '',
                     created_at: String(row.created_at)
                 }));
             } catch (err) {
@@ -145,9 +146,9 @@ const app = createApp({
 
         const openUserModal = (user = null) => {
             if (user) {
-                editingUser.value = { id: user.id, email: user.email, password: '', role: user.role };
+                editingUser.value = { id: user.id, email: user.email, password: '', role: user.role, github_token: user.github_token || '' };
             } else {
-                editingUser.value = { id: null, email: '', password: '', role: 'editor' };
+                editingUser.value = { id: null, email: '', password: '', role: 'editor', github_token: '' };
             }
             showUserModal.value = true;
         };
@@ -161,13 +162,13 @@ const app = createApp({
                     if (editingUser.value.password) {
                         const hashedPassword = await hashPassword(editingUser.value.password);
                         await dbExecute({
-                            sql: 'UPDATE users SET email = ?, password_hash = ?, role = ? WHERE id = ?',
-                            args: [editingUser.value.email, hashedPassword, editingUser.value.role, editingUser.value.id]
+                            sql: 'UPDATE users SET email = ?, password_hash = ?, role = ?, github_token = ? WHERE id = ?',
+                            args: [editingUser.value.email, hashedPassword, editingUser.value.role, editingUser.value.github_token, editingUser.value.id]
                         });
                     } else {
                         await dbExecute({
-                            sql: 'UPDATE users SET email = ?, role = ? WHERE id = ?',
-                            args: [editingUser.value.email, editingUser.value.role, editingUser.value.id]
+                            sql: 'UPDATE users SET email = ?, role = ?, github_token = ? WHERE id = ?',
+                            args: [editingUser.value.email, editingUser.value.role, editingUser.value.github_token, editingUser.value.id]
                         });
                     }
                 } else {
@@ -175,12 +176,21 @@ const app = createApp({
                     if (!editingUser.value.password) throw new Error("Password is required for new users.");
                     const hashedPassword = await hashPassword(editingUser.value.password);
                     await dbExecute({
-                        sql: 'INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?)',
-                        args: [editingUser.value.email, hashedPassword, editingUser.value.role]
+                        sql: 'INSERT INTO users (email, password_hash, role, github_token) VALUES (?, ?, ?, ?)',
+                        args: [editingUser.value.email, hashedPassword, editingUser.value.role, editingUser.value.github_token]
                     });
                 }
                 showUserModal.value = false;
                 await fetchUsers();
+
+                // If editing self, update current session
+                if (editingUser.value.id === currentUser.value?.id) {
+                    currentUser.value.email = editingUser.value.email;
+                    currentUser.value.role = editingUser.value.role;
+                    currentUser.value.github_token = editingUser.value.github_token;
+                    githubToken.value = editingUser.value.github_token;
+                    localStorage.setItem('cmsUser', JSON.stringify(currentUser.value));
+                }
             } catch (err) {
                 error.value = "Failed to save user: " + err.message;
             } finally {
@@ -258,6 +268,23 @@ const app = createApp({
             label1: '', label2: '', is_trans: 0
         });
 
+        // --- Database Sharing State ---
+        const availableTables = ref([]);
+        const githubToken = ref(localStorage.getItem('githubToken') || '');
+        const dbSharingSettings = reactive({
+            selectedTables: [],
+            autoIncrement: true,
+            manualVersion: '',
+            configName: 'default',
+            backupMode: false,
+            triggerMethod: 'dispatch' // 'dispatch' or 'commit'
+        });
+        const dbSharingPresets = ref(JSON.parse(localStorage.getItem('dbSharingPresets') || '[]'));
+        const latestPublishedDb = ref({ version: '0.0', url: '', date: '' });
+        const publishedReleases = ref([]);
+
+        const currentDbVersion = ref(0);
+
         const bulkInput = reactive({
             arabic: '',
             transliteration: '',
@@ -295,6 +322,9 @@ const app = createApp({
                     if (savedUser && sessionExpiry) {
                         if (Date.now() < parseInt(sessionExpiry)) {
                             currentUser.value = JSON.parse(savedUser);
+                            if (currentUser.value.github_token) {
+                                githubToken.value = currentUser.value.github_token;
+                            }
                             isLoggedIn.value = true;
                             await fetchLanguages();
                             await fetchCategories(null);
@@ -343,12 +373,19 @@ const app = createApp({
                 });
 
                 if (result.rows.length > 0) {
+                    const user = result.rows[0];
                     currentUser.value = {
-                        id: result.rows[0].id,
-                        email: result.rows[0].email,
-                        role: result.rows[0].role
+                        id: user.id,
+                        email: user.email,
+                        role: user.role,
+                        github_token: user.github_token
                     };
                     isLoggedIn.value = true;
+
+                    // Populate GitHub token if present
+                    if (user.github_token) {
+                        githubToken.value = user.github_token;
+                    }
 
                     // Save session to LocalStorage (48h expiry)
                     const expiry = Date.now() + (48 * 60 * 60 * 1000);
@@ -826,6 +863,222 @@ const app = createApp({
             }
         };
 
+        // --- Database Sharing Logic ---
+        const fetchAvailableTables = async () => {
+            try {
+                const result = await dbExecute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
+                availableTables.value = result.rows.map(r => r.name);
+            } catch (err) {
+                console.error("Failed to fetch tables:", err);
+            }
+        };
+
+        const fetchCurrentVersion = async () => {
+            try {
+                const response = await fetch('version.json');
+                if (response.ok) {
+                    const data = await response.json();
+                    currentDbVersion.value = data.version;
+                }
+            } catch (err) {
+                console.error("Failed to fetch version:", err);
+            }
+        };
+
+        const fetchReleases = async () => {
+            if (!githubToken.value) return;
+            try {
+                // Detect repo from URL (works for GitHub Pages: /owner/repo/)
+                const pathParts = window.location.pathname.split('/').filter(Boolean);
+                let owner = 'alihusainsorathiya', repo = 'dnaweb';
+
+                if (pathParts.length >= 2) {
+                    owner = pathParts[0];
+                    repo = pathParts[1];
+                }
+
+                const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/releases`, {
+                    headers: { 'Authorization': `token ${githubToken.value}` }
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    publishedReleases.value = data.map(r => ({
+                        version: r.tag_name.replace('v', ''),
+                        date: new Date(r.published_at).toLocaleString(),
+                        url: r.assets.find(a => a.name.endsWith('.db'))?.browser_download_url || ''
+                    }));
+                    if (publishedReleases.value.length > 0) {
+                        latestPublishedDb.value = publishedReleases.value[0];
+                    }
+                }
+            } catch (err) {
+                console.error("Failed to fetch releases:", err);
+            }
+        };
+
+        const triggerPublishWorkflow = async () => {
+            if (!githubToken.value) {
+                alert("Please enter a GitHub Personal Access Token first.");
+                return;
+            }
+
+            const methodLabel = dbSharingSettings.triggerMethod === 'commit' ? 'File Commit (Auto-trigger)' : 'API Dispatch (Manual)';
+            if (!confirm(`Are you sure you want to trigger the database publish using the ${methodLabel} method?`)) {
+                return;
+            }
+
+            if (dbSharingSettings.triggerMethod === 'commit') {
+                return triggerViaCommit();
+            }
+
+            isLoading.value = true;
+            try {
+                const pathParts = window.location.pathname.split('/').filter(Boolean);
+                let owner = 'alihusainsorathiya', repo = 'dnaweb';
+
+                if (pathParts.length >= 2) {
+                    owner = pathParts[0];
+                    repo = pathParts[1];
+                }
+
+                const nextVersion = dbSharingSettings.autoIncrement
+                    ? (parseFloat(currentDbVersion.value) + 0.01).toFixed(2)
+                    : dbSharingSettings.manualVersion;
+
+                const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/workflows/publish-db.yml/dispatches`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `token ${githubToken.value}`,
+                        'Accept': 'application/vnd.github.v3+json',
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        ref: 'main',
+                        inputs: {
+                            version: String(nextVersion),
+                            tables: dbSharingSettings.selectedTables.join(','),
+                            config_name: dbSharingSettings.configName
+                        }
+                    })
+                });
+
+                if (response.ok) {
+                    alert(`Workflow triggered via API! Version ${nextVersion} will be published shortly.`);
+                    localStorage.setItem('githubToken', githubToken.value);
+                } else {
+                    const errData = await response.json();
+                    throw new Error(errData.message || 'Failed to trigger workflow');
+                }
+            } catch (err) {
+                alert("Error: " + err.message);
+            } finally {
+                isLoading.value = false;
+            }
+        };
+
+        const triggerViaCommit = async () => {
+            isLoading.value = true;
+            try {
+                const pathParts = window.location.pathname.split('/').filter(Boolean);
+                let owner = 'alihusainsorathiya', repo = 'dnaweb';
+
+                if (pathParts.length >= 2) {
+                    owner = pathParts[0];
+                    repo = pathParts[1];
+                }
+
+                const nextVersion = dbSharingSettings.autoIncrement
+                    ? (parseFloat(currentDbVersion.value) + 0.01).toFixed(2)
+                    : dbSharingSettings.manualVersion;
+
+                const configContent = JSON.stringify({
+                    version: String(nextVersion),
+                    tables: dbSharingSettings.selectedTables,
+                    config_name: dbSharingSettings.configName,
+                    updated_at: new Date().toISOString()
+                }, null, 2);
+
+                // Get current file SHA if it exists
+                let sha = null;
+                try {
+                    const getRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/db_sharing_config.json`, {
+                        headers: { 'Authorization': `token ${githubToken.value}` }
+                    });
+                    if (getRes.ok) {
+                        const fileData = await getRes.json();
+                        sha = fileData.sha;
+                    }
+                } catch (e) {
+                    console.log("Config file doesn't exist yet.");
+                }
+
+                const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/db_sharing_config.json`, {
+                    method: 'PUT',
+                    headers: {
+                        'Authorization': `token ${githubToken.value}`,
+                        'Accept': 'application/vnd.github.v3+json',
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        message: `chore: trigger database publish v${nextVersion} [bot]`,
+                        content: btoa(configContent),
+                        branch: 'main',
+                        sha: sha
+                    })
+                });
+
+                if (response.ok) {
+                    alert(`Config committed! Workflow will trigger automatically. Version ${nextVersion}.`);
+                    localStorage.setItem('githubToken', githubToken.value);
+                } else {
+                    const errData = await response.json();
+                    throw new Error(errData.message || 'Failed to commit config');
+                }
+            } catch (err) {
+                alert("Error: " + err.message);
+            } finally {
+                isLoading.value = false;
+            }
+        };
+
+        const savePreset = () => {
+            const name = prompt("Enter a name for this preset:");
+            if (!name) return;
+            const preset = {
+                name,
+                tables: [...dbSharingSettings.selectedTables],
+                configName: dbSharingSettings.configName
+            };
+            dbSharingPresets.value.push(preset);
+            localStorage.setItem('dbSharingPresets', JSON.stringify(dbSharingPresets.value));
+        };
+
+        const loadPreset = (preset) => {
+            dbSharingSettings.selectedTables = [...preset.tables];
+            dbSharingSettings.configName = preset.configName;
+        };
+
+        const deletePreset = (index) => {
+            if (confirm("Delete this preset?")) {
+                dbSharingPresets.value.splice(index, 1);
+                localStorage.setItem('dbSharingPresets', JSON.stringify(dbSharingPresets.value));
+            }
+        };
+
+        watch(currentView, (newView) => {
+            if (newView === 'db-sharing') {
+                fetchAvailableTables();
+                fetchCurrentVersion();
+                fetchReleases();
+            }
+        });
+
+        watch(() => dbSharingSettings.backupMode, (val) => {
+            if (!val && publishedReleases.value.length > 0) {
+                latestPublishedDb.value = publishedReleases.value[0];
+            }
+        });
+
         const getLineNumbers = (text) => {
             const linesCount = (text || '').split('\n').length;
             return Array.from({length: linesCount}, (_, i) => i + 1).join('\n');
@@ -913,6 +1166,16 @@ const app = createApp({
             try {
                 await navigator.clipboard.writeText(sql);
                 alert("SQL Copied to clipboard!");
+            } catch (err) {
+                console.error('Failed to copy text: ', err);
+            }
+        };
+
+        const copyToClipboard = async (text) => {
+            if (!text) return;
+            try {
+                await navigator.clipboard.writeText(text);
+                alert("Copied to clipboard!");
             } catch (err) {
                 console.error('Failed to copy text: ', err);
             }
@@ -1020,7 +1283,10 @@ const app = createApp({
 
             showTranslationsFor, translations, unsavedChanges, bulkInput, selectedLanguageId, selectedLanguageName, categoryMeta,
             viewTranslations, closeTranslations, processBulkTranslations, getLineNumbers,
-            addTranslationRow, removeTranslationRow, toggleEditTranslation, copySql, sortTranslations, saveTranslations, saveCategoryMeta
+            addTranslationRow, removeTranslationRow, toggleEditTranslation, copySql, sortTranslations, saveTranslations, saveCategoryMeta,
+
+            availableTables, githubToken, dbSharingSettings, dbSharingPresets, latestPublishedDb, publishedReleases, currentDbVersion,
+            triggerPublishWorkflow, savePreset, loadPreset, deletePreset, copyToClipboard
         };
     }
 });

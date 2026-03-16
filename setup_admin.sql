@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS users (
     email TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'editor',
+    github_token TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 

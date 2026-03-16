@@ -32,6 +32,9 @@
                         <button v-if="currentUser?.role === 'admin'" @click="currentView = 'users'; fetchUsers()" :class="['px-3 py-1 rounded transition text-sm font-medium', currentView === 'users' ? 'bg-indigo-800 text-white' : 'text-indigo-200 hover:text-white hover:bg-indigo-700']">
                             Users
                         </button>
+                        <button v-if="currentUser?.role === 'admin'" @click="currentView = 'db-sharing'" :class="['px-3 py-1 rounded transition text-sm font-medium', currentView === 'db-sharing' ? 'bg-indigo-800 text-white' : 'text-indigo-200 hover:text-white hover:bg-indigo-700']">
+                            DB Sharing
+                        </button>
                     </nav>
                 </div>
 
@@ -60,6 +63,9 @@
                 </button>
                 <button v-if="currentUser?.role === 'admin'" @click="currentView = 'users'; fetchUsers()" :class="['px-3 py-1 rounded transition text-sm font-medium', currentView === 'users' ? 'bg-indigo-900 text-white' : 'text-indigo-200 hover:text-white']">
                     Users
+                </button>
+                <button v-if="currentUser?.role === 'admin'" @click="currentView = 'db-sharing'" :class="['px-3 py-1 rounded transition text-sm font-medium', currentView === 'db-sharing' ? 'bg-indigo-900 text-white' : 'text-indigo-200 hover:text-white']">
+                    DB Sharing
                 </button>
             </div>
         </header>
@@ -535,7 +541,181 @@
                     </div>
                 </div>
 
-                <!-- USERS VIEW -->
+                <!-- DATABASE SHARING VIEW -->
+                <div v-if="currentView === 'db-sharing' && currentUser?.role === 'admin'" class="space-y-6">
+                    <div class="flex justify-between items-center mb-6">
+                        <h2 class="text-2xl font-bold text-gray-800">Database Sharing</h2>
+                        <div class="flex items-center gap-2 text-sm text-gray-500">
+                            <span class="flex h-2 w-2 rounded-full bg-green-500"></span>
+                            Turso Live Sync
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <!-- Left: Selection & Presets -->
+                        <div class="lg:col-span-2 space-y-6">
+                            <!-- Table Selection -->
+                            <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                                <div class="flex justify-between items-center mb-4">
+                                    <h3 class="text-lg font-semibold text-gray-800">Select Tables to Include</h3>
+                                    <div class="flex gap-2">
+                                        <button @click="dbSharingSettings.selectedTables = [...availableTables]" class="text-xs text-indigo-600 hover:text-indigo-800">Select All</button>
+                                        <button @click="dbSharingSettings.selectedTables = []" class="text-xs text-gray-500 hover:text-gray-700">Clear</button>
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-64 overflow-y-auto p-1">
+                                    <label v-for="table in availableTables" :key="table"
+                                           class="flex items-center p-3 rounded-md border border-gray-100 bg-gray-50 hover:bg-white hover:border-indigo-200 transition cursor-pointer">
+                                        <input type="checkbox" :value="table" v-model="dbSharingSettings.selectedTables"
+                                               class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded">
+                                        <span class="ml-3 text-sm text-gray-700 truncate" :title="table">{{ table }}</span>
+                                    </label>
+                                </div>
+                                <div v-if="availableTables.length === 0" class="text-center py-8 text-gray-400">
+                                    No tables found in Turso.
+                                </div>
+                            </div>
+
+                            <!-- Presets -->
+                            <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                                <div class="flex justify-between items-center mb-4">
+                                    <h3 class="text-lg font-semibold text-gray-800">Saved Presets</h3>
+                                    <button @click="savePreset" class="text-sm bg-indigo-50 text-indigo-600 px-3 py-1 rounded hover:bg-indigo-100 transition">Save Current as Preset</button>
+                                </div>
+                                <div v-if="dbSharingPresets.length > 0" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div v-for="(preset, index) in dbSharingPresets" :key="index" class="flex justify-between items-center p-3 bg-gray-50 border border-gray-100 rounded-lg">
+                                        <div>
+                                            <p class="text-sm font-medium text-gray-900">{{ preset.name }}</p>
+                                            <p class="text-xs text-gray-500">{{ preset.tables.length }} tables included</p>
+                                        </div>
+                                        <div class="flex gap-2">
+                                            <button @click="loadPreset(preset)" class="text-xs text-indigo-600 hover:underline">Load</button>
+                                            <button @click="deletePreset(index)" class="text-xs text-red-600 hover:underline">Delete</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div v-else class="text-center py-4 text-gray-400 text-sm">
+                                    No presets saved yet.
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Right: Publish & Info -->
+                        <div class="space-y-6">
+                            <!-- GitHub Connection -->
+                            <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                                <h3 class="text-lg font-semibold text-gray-800 mb-4">GitHub Connection</h3>
+                                <div class="space-y-4">
+                                    <div>
+                                        <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Personal Access Token</label>
+                                        <input v-model="githubToken" type="password" placeholder="ghp_..."
+                                               class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500">
+                                        <p class="mt-1 text-[10px] text-gray-400">Requires 'repo' and 'workflow' scopes.</p>
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Trigger Method</label>
+                                        <div class="grid grid-cols-2 gap-2">
+                                            <button @click="dbSharingSettings.triggerMethod = 'dispatch'"
+                                                    :class="dbSharingSettings.triggerMethod === 'dispatch' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'"
+                                                    class="px-3 py-2 rounded-md text-xs font-medium transition-colors">
+                                                API Dispatch
+                                            </button>
+                                            <button @click="dbSharingSettings.triggerMethod = 'commit'"
+                                                    :class="dbSharingSettings.triggerMethod === 'commit' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'"
+                                                    class="px-3 py-2 rounded-md text-xs font-medium transition-colors">
+                                                File Commit
+                                            </button>
+                                        </div>
+                                        <p class="mt-1 text-[10px] text-gray-400">
+                                            {{ dbSharingSettings.triggerMethod === 'dispatch' ? 'Manual trigger via GitHub Actions API.' : 'Automatic trigger via config file commit.' }}
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Configuration Name</label>
+                                        <input v-model="dbSharingSettings.configName" type="text" placeholder="e.g. Default, Mobile App"
+                                               class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500">
+                                        <p class="mt-1 text-[10px] text-gray-400">Optional label for this release.</p>
+                                    </div>
+                                    <div class="pt-2 flex items-center justify-between border-t border-gray-100">
+                                        <span class="text-xs text-gray-500">Backup Mode</span>
+                                        <button @click="dbSharingSettings.backupMode = !dbSharingSettings.backupMode"
+                                                :class="dbSharingSettings.backupMode ? 'bg-indigo-600' : 'bg-gray-200'"
+                                                class="relative inline-flex h-5 w-10 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out">
+                                            <span :class="dbSharingSettings.backupMode ? 'translate-x-5' : 'translate-x-0'"
+                                                  class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Publication Info -->
+                            <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                                <h3 class="text-lg font-semibold text-gray-800 mb-4">Latest Publication</h3>
+                                <div v-if="latestPublishedDb.url" class="space-y-3">
+                                    <div class="bg-indigo-50 p-3 rounded-lg border border-indigo-100">
+                                        <div class="flex justify-between items-start mb-1">
+                                            <span class="text-xs font-bold text-indigo-800">Version {{ latestPublishedDb.version }}</span>
+                                            <span class="text-[10px] text-indigo-400">{{ latestPublishedDb.date }}</span>
+                                        </div>
+                                        <div class="flex items-center gap-2 mt-2">
+                                            <input readonly :value="latestPublishedDb.url" class="flex-1 bg-white border border-indigo-200 px-2 py-1 rounded text-[10px] truncate">
+                                            <button @click="copyToClipboard(latestPublishedDb.url)" class="text-indigo-600 hover:text-indigo-800">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m-1 4h.01M9 16h5m0 0l-1.5 1.5M14 16l-1.5-1.5"></path></svg>
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <!-- Version Selection (Backup Mode) -->
+                                    <div v-if="dbSharingSettings.backupMode" class="pt-4 border-t border-gray-100">
+                                        <label class="block text-xs font-medium text-gray-500 uppercase mb-2">Select Previous Version</label>
+                                        <select v-model="latestPublishedDb" class="w-full px-2 py-1 border border-gray-300 rounded-md text-xs">
+                                            <option v-for="rel in publishedReleases" :key="rel.version" :value="rel">
+                                                v{{ rel.version }} ({{ rel.date }})
+                                            </option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div v-else class="text-center py-4 text-gray-400 text-sm italic">
+                                    No publications found.
+                                </div>
+                            </div>
+
+                            <!-- Publish Button -->
+                            <div class="space-y-4">
+                                <div class="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                                    <div class="flex items-center justify-between mb-3">
+                                        <span class="text-sm font-medium text-gray-700">Auto-increment Version</span>
+                                        <button @click="dbSharingSettings.autoIncrement = !dbSharingSettings.autoIncrement"
+                                                :class="dbSharingSettings.autoIncrement ? 'bg-green-600' : 'bg-gray-200'"
+                                                class="relative inline-flex h-5 w-10 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out">
+                                            <span :class="dbSharingSettings.autoIncrement ? 'translate-x-5' : 'translate-x-0'"
+                                                  class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+                                        </button>
+                                    </div>
+
+                                    <div v-if="dbSharingSettings.autoIncrement" class="text-xs text-gray-500">
+                                        Next Version: <span class="font-bold text-gray-800">{{ (parseFloat(currentDbVersion) + 0.01).toFixed(2) }}</span>
+                                    </div>
+                                    <div v-else>
+                                        <input v-model="dbSharingSettings.manualVersion" type="text" placeholder="e.g. 1.50"
+                                               class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500">
+                                    </div>
+                                </div>
+
+                                <button @click="triggerPublishWorkflow"
+                                        :disabled="isLoading || dbSharingSettings.selectedTables.length === 0"
+                                        class="w-full bg-indigo-600 text-white font-bold py-4 px-6 rounded-lg shadow-lg hover:bg-indigo-700 disabled:bg-indigo-300 disabled:cursor-not-allowed transition-all flex justify-center items-center gap-2">
+                                    <svg v-if="isLoading" class="animate-spin h-5 w-5 text-white" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                                    {{ isLoading ? 'Publishing...' : 'Publish Database' }}
+                                </button>
+                                <p class="text-[10px] text-gray-400 text-center">
+                                    This will trigger a GitHub Action to generate, encrypt, and release the selected tables.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- USER MANAGEMENT VIEW -->
                 <div v-if="currentView === 'users' && currentUser?.role === 'admin'">
                     <div class="flex justify-between items-center mb-6">
                         <h2 class="text-2xl font-bold text-gray-800">User Management</h2>
@@ -807,6 +987,11 @@
                                         <option value="editor">Editor (Can manage categories/content)</option>
                                         <option value="admin">Admin (Full access + user management)</option>
                                     </select>
+                                </div>
+                                <div v-if="editingUser.role === 'admin'">
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">GitHub Personal Access Token (PAT)</label>
+                                    <input v-model="editingUser.github_token" type="password" placeholder="ghp_..." class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500">
+                                    <p class="mt-1 text-[10px] text-gray-400">Optional: Saves token to your profile for auto-loading on login.</p>
                                 </div>
                             </div>
                         </div>
