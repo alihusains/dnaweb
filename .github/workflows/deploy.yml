@@ -2,7 +2,7 @@ name: Deploy ShiaEssentials CMS
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "dev"]
   workflow_dispatch:
 
 permissions:
@@ -21,30 +21,45 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout 🛎️
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Pages ⚙️
+      - name: Setup Pages
         uses: actions/configure-pages@v4
 
-      - name: Inject Secrets into Config 🔐
+      - name: Inject Secrets into Config
         run: |
-          cat <<'EOF' > config.js
+          # Set default branch based on which git branch triggered the deploy
+          if [ "${{ github.ref_name }}" = "dev" ]; then
+            DEFAULT_BRANCH="dev"
+          else
+            DEFAULT_BRANCH="production"
+          fi
+
+          cat <<EOF > config.js
           window.CONFIG = {
-            url: '${{ secrets.TURSO_URL || secrets.TURSO_DB_URL }}',
-            token: '${{ secrets.TURSO_TOKEN || secrets.TURSO_AUTH_TOKEN }}'
+            branches: {
+              production: {
+                url: '${{ secrets.TURSO_URL || secrets.TURSO_DB_URL }}',
+                token: '${{ secrets.TURSO_TOKEN || secrets.TURSO_AUTH_TOKEN }}',
+                label: 'Production'
+              },
+              dev: {
+                url: '${{ secrets.TURSO_DEV_URL }}',
+                token: '${{ secrets.TURSO_DEV_TOKEN }}',
+                label: 'Dev'
+              }
+            },
+            defaultBranch: '${DEFAULT_BRANCH}'
           };
           EOF
-          echo "Verification: config.js created successfully with quoted HEREDOC."
+          echo "Deployed from branch: ${{ github.ref_name }}, defaultBranch set to: ${DEFAULT_BRANCH}"
 
-      - name: List files for debugging 🔍
-        run: ls -la
-
-      - name: Upload artifact 📤
+      - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: '.'
 
-      - name: Deploy to GitHub Pages 🚀
+      - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4

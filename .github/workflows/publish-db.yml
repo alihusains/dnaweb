@@ -2,6 +2,7 @@ name: Publish Shared Database
 
 on:
   push:
+    branches: ["main", "dev"]
     paths:
       - 'db_sharing_config.json'
   workflow_dispatch:
@@ -16,6 +17,14 @@ on:
         description: 'Name of the configuration preset used'
         required: false
         default: 'default'
+      branch:
+        description: 'Database branch to publish from (production or dev)'
+        required: false
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - dev
 
 permissions:
   contents: write
@@ -37,6 +46,26 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y sqlcipher
           npm install @libsql/client sqlite3 sqlite
+
+      - name: Set database credentials based on branch
+        run: |
+          # For workflow_dispatch, use the input. For push, auto-detect from git branch.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            BRANCH="${{ github.event.inputs.branch || 'production' }}"
+          elif [ "${{ github.ref_name }}" = "dev" ]; then
+            BRANCH="dev"
+          else
+            BRANCH="production"
+          fi
+          if [ "$BRANCH" = "dev" ]; then
+            echo "TURSO_URL=${{ secrets.TURSO_DEV_URL }}" >> $GITHUB_ENV
+            echo "TURSO_TOKEN=${{ secrets.TURSO_DEV_TOKEN }}" >> $GITHUB_ENV
+            echo "DB_BRANCH=dev" >> $GITHUB_ENV
+          else
+            echo "TURSO_URL=${{ secrets.TURSO_URL }}" >> $GITHUB_ENV
+            echo "TURSO_TOKEN=${{ secrets.TURSO_AUTH_TOKEN }}" >> $GITHUB_ENV
+            echo "DB_BRANCH=production" >> $GITHUB_ENV
+          fi
 
       - name: Create Database Generation Script
         run: |
@@ -65,11 +94,12 @@ jobs:
             const url = process.env.TURSO_URL;
             const token = process.env.TURSO_TOKEN;
             const password = process.env.DB_PASSWORD;
+            const branch = process.env.DB_BRANCH || 'production';
 
             const dbName = `database.sqlite`;
             const tempDb = `temp_v${version}.db`;
 
-            console.log(`Generating version ${version} with tables: ${tables.join(', ')}`);
+            console.log(`Generating version ${version} from ${branch} branch with tables: ${tables.join(', ')}`);
 
             const localDb = await open({
               filename: tempDb,
@@ -105,8 +135,6 @@ jobs:
 
             // Encryption using SQLCipher CLI
             console.log(`Encrypting database...`);
-            // Ensure the source is not encrypted (it's not) and destination gets encrypted
-            // Using a more standard SQLCipher export pattern
             const encryptCmd = `sqlcipher ${tempDb} "ATTACH DATABASE '${dbName}' AS encrypted KEY '${password}'; SELECT sqlcipher_export('encrypted'); DETACH DATABASE encrypted;"`;
             execSync(encryptCmd);
 
@@ -142,8 +170,6 @@ jobs:
 
       - name: Generate Database File
         env:
-          TURSO_URL: ${{ secrets.TURSO_URL }}
-          TURSO_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           INPUT_VERSION: ${{ github.event.inputs.version }}
           INPUT_TABLES: ${{ github.event.inputs.tables }}
@@ -162,11 +188,12 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ env.DB_VERSION }}
-          name: Database Release v${{ env.DB_VERSION }}
+          tag_name: v${{ env.DB_VERSION }}-${{ env.DB_BRANCH }}
+          name: Database Release v${{ env.DB_VERSION }} (${{ env.DB_BRANCH }})
           body: |
             Published shared database for ShiaEssentials.
             Version: ${{ env.DB_VERSION }}
+            Branch: ${{ env.DB_BRANCH }}
             Tables included: ${{ env.DB_TABLES }}
             Configuration: ${{ env.DB_CONFIG_NAME }}
           files: |

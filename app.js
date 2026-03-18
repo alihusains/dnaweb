@@ -14,6 +14,14 @@ const app = createApp({
         const error = ref(null);
         let libsqlClient = null;
 
+        // Branch switching
+        const currentBranch = ref(localStorage.getItem('cmsBranch') || window.CONFIG?.defaultBranch || 'production');
+        const availableBranches = ref(
+            window.CONFIG?.branches
+                ? Object.entries(window.CONFIG.branches).map(([key, val]) => ({ key, label: val.label || key }))
+                : [{ key: 'production', label: 'Production' }]
+        );
+
         // DB Wrappers for consistent error handling and client check
         const dbExecute = async (stmt) => {
             if (!libsqlClient) throw new Error("Database not connected");
@@ -318,10 +326,47 @@ const app = createApp({
         };
 
 
+        // Branch switching function
+        const switchBranch = async (branchKey) => {
+            const branchConfig = window.CONFIG?.branches?.[branchKey];
+            if (!branchConfig) {
+                error.value = 'Unknown branch: ' + branchKey;
+                return;
+            }
+            // Disconnect current
+            if (isDbConnected.value) {
+                logout();
+                isDbConnected.value = false;
+            }
+            currentBranch.value = branchKey;
+            localStorage.setItem('cmsBranch', branchKey);
+            dbUrl.value = branchConfig.url;
+            authToken.value = branchConfig.token;
+            const connected = await connectDb();
+            if (connected) {
+                // Restore session if valid
+                const savedUser = localStorage.getItem('cmsUser');
+                const sessionExpiry = localStorage.getItem('cmsSessionExpiry');
+                if (savedUser && sessionExpiry && Date.now() < parseInt(sessionExpiry)) {
+                    currentUser.value = JSON.parse(savedUser);
+                    isLoggedIn.value = true;
+                    if (currentUser.value.github_token) githubToken.value = currentUser.value.github_token;
+                    await fetchLanguages();
+                    await syncRoute();
+                }
+            }
+        };
+
         // --- Lifecycle ---
         onMounted(async () => {
-            // Restore DB config first
-            if (window.CONFIG?.url && window.CONFIG?.token) {
+            // Restore DB config from branch-aware config
+            const branch = currentBranch.value;
+            const branchConfig = window.CONFIG?.branches?.[branch];
+            if (branchConfig) {
+                dbUrl.value = branchConfig.url;
+                authToken.value = branchConfig.token;
+            } else if (window.CONFIG?.url && window.CONFIG?.token) {
+                // Legacy single-config fallback
                 dbUrl.value = window.CONFIG.url;
                 authToken.value = window.CONFIG.token;
             } else {
@@ -1228,6 +1273,7 @@ const app = createApp({
         return {
             dbUrl, authToken, isDbConnected, isLoggedIn, isLoading, error, currentUser, loginForm,
             connectDb, disconnectDb, userLogin, logout,
+            currentBranch, availableBranches, switchBranch,
 
             currentView, languages,
             fetchLanguages, openLanguageModal, closeLanguageModal, saveLanguage, deleteLanguage,
