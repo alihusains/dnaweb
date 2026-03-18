@@ -1039,32 +1039,37 @@ const app = createApp({
         };
 
         const processBulkTranslations = () => {
-            const arLines = bulkInput.arabic.split('\n');
-            const trLines = bulkInput.transliteration.split('\n');
-            const tlLines = bulkInput.translation.split('\n');
-            const enLines = bulkInput.english.split('\n');
+            const arEmpty = bulkInput.arabic.trim() === '';
+            const trEmpty = bulkInput.transliteration.trim() === '';
+            const tlEmpty = bulkInput.translation.trim() === '';
+            const enEmpty = bulkInput.english.trim() === '';
 
-            const maxLines = Math.max(arLines.length, trLines.length, tlLines.length, enLines.length);
-
-            if (maxLines === 0 || (bulkInput.arabic === '' && bulkInput.transliteration === '' && bulkInput.translation === '' && bulkInput.english === '')) {
+            if (arEmpty && trEmpty && tlEmpty && enEmpty) {
                 alert("Please paste some text first.");
                 return;
             }
+
+            const arLines = arEmpty ? [] : bulkInput.arabic.split('\n');
+            const trLines = trEmpty ? [] : bulkInput.transliteration.split('\n');
+            const tlLines = tlEmpty ? [] : bulkInput.translation.split('\n');
+            const enLines = enEmpty ? [] : bulkInput.english.split('\n');
+
+            const maxLines = Math.max(arLines.length, trLines.length, tlLines.length, enLines.length);
 
             let currentSeq = translations.value.length > 0 ? Math.max(...translations.value.map(t => t.sequence)) : 0;
             const langTitle = showTranslationsFor.value.english_name;
 
             const newTranslations = [];
             for (let i = 0; i < maxLines; i++) {
-                const ar = (arLines[i] || '').trim();
-                const tr = (trLines[i] || '').trim();
-                const tl = (tlLines[i] || '').trim();
-                const en = (enLines[i] || '').trim();
+                const ar = arEmpty ? null : (arLines[i] || '').trim();
+                const tr = trEmpty ? null : (trLines[i] || '').trim();
+                const tl = tlEmpty ? null : (tlLines[i] || '').trim();
+                const en = enEmpty ? null : (enLines[i] || '').trim();
 
                 // Only skip if we are at the very end and all are empty
                 // (prevents trailing empty rows from extra newlines)
                 if (i >= arLines.length && i >= trLines.length && i >= tlLines.length && i >= enLines.length) continue;
-                if (ar === '' && tr === '' && tl === '' && en === '' && i === maxLines - 1) continue;
+                if (!ar && !tr && !tl && !en && i === maxLines - 1) continue;
 
                 currentSeq++;
                 newTranslations.push({
@@ -1153,10 +1158,10 @@ const app = createApp({
             const catId = showTranslationsFor.value.id;
 
             const validRows = translations.value.filter(
-                row => row.arabic.trim() !== '' || row.transliteration.trim() !== '' || row.translation.trim() !== '' || row.english.trim() !== ''
+                row => (row.arabic ?? '').trim() !== '' || (row.transliteration ?? '').trim() !== '' || (row.translation ?? '').trim() !== '' || (row.english ?? '').trim() !== ''
             );
 
-            const hasTransliteration = validRows.some(row => row.transliteration.trim() !== '');
+            const hasTransliteration = validRows.some(row => (row.transliteration ?? '').trim() !== '');
 
             isLoading.value = true;
             error.value = null;
@@ -1181,7 +1186,7 @@ const app = createApp({
                                     sequence = ?, language_title = ?, arabic = ?, translation = ?, transliteration = ?, english = ?, is_visible = ?
                                   WHERE id = ?`,
                             args: [
-                                row.sequence, row.language_title.trim(), row.arabic.trim(), row.translation.trim(), row.transliteration.trim(), row.english.trim(), row.is_visible ? 1 : 0, row.id
+                                row.sequence, row.language_title.trim(), row.arabic == null ? null : row.arabic.trim(), row.translation == null ? null : row.translation.trim(), row.transliteration == null ? null : row.transliteration.trim(), row.english == null ? null : row.english.trim(), row.is_visible ? 1 : 0, row.id
                             ]
                         });
                     } else {
@@ -1191,7 +1196,7 @@ const app = createApp({
                                     (category_id, sequence, language_title, arabic, translation, transliteration, english, is_visible)
                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
                             args: [
-                                catId, row.sequence, row.language_title.trim(), row.arabic.trim(), row.translation.trim(), row.transliteration.trim(), row.english.trim(), row.is_visible ? 1 : 0
+                                catId, row.sequence, row.language_title.trim(), row.arabic == null ? null : row.arabic.trim(), row.translation == null ? null : row.translation.trim(), row.transliteration == null ? null : row.transliteration.trim(), row.english == null ? null : row.english.trim(), row.is_visible ? 1 : 0
                             ]
                         });
                     }
