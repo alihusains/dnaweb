@@ -412,7 +412,7 @@
                                         <p class="text-[10px] text-gray-500 italic">Paste text here, one line per row. Empty lines are ignored.</p>
                                     </div>
 
-                                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
                                         <div>
                                             <label class="block text-xs font-bold text-gray-700 mb-1 text-right">Arabic (RTL)</label>
                                             <div class="textarea-wrapper font-arabic textarea-rtl">
@@ -432,6 +432,13 @@
                                             <div class="textarea-wrapper font-gujarati">
                                                 <div class="line-numbers" aria-hidden="true" v-text="getLineNumbers(bulkInput.translation)"></div>
                                                 <textarea v-model="bulkInput.translation" rows="6" class="textarea-with-lines" placeholder="Paste Translation here..."></textarea>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs font-bold text-gray-700 mb-1">English</label>
+                                            <div class="textarea-wrapper">
+                                                <div class="line-numbers" aria-hidden="true" v-text="getLineNumbers(bulkInput.english)"></div>
+                                                <textarea v-model="bulkInput.english" rows="6" class="textarea-with-lines" placeholder="Paste English here..."></textarea>
                                             </div>
                                         </div>
                                     </div>
@@ -468,9 +475,10 @@
                                                 <tr>
                                                     <th class="w-12 px-2 py-3 text-center text-xs font-medium text-gray-500">Seq</th>
                                                     <th class="w-32 px-2 py-3 text-left text-xs font-bold text-gray-700">Meta</th>
-                                                    <th class="w-1/4 px-4 py-3 text-right text-xs font-bold text-gray-700">Arabic</th>
-                                                    <th class="w-1/4 px-4 py-3 text-left text-xs font-bold text-gray-700">Translit.</th>
-                                                    <th class="w-1/4 px-4 py-3 text-left text-xs font-bold text-gray-700">Translation</th>
+                                                    <th class="w-1/5 px-4 py-3 text-right text-xs font-bold text-gray-700">Arabic</th>
+                                                    <th class="w-1/5 px-4 py-3 text-left text-xs font-bold text-gray-700">Translit.</th>
+                                                    <th class="w-1/5 px-4 py-3 text-left text-xs font-bold text-gray-700">Translation</th>
+                                                    <th class="w-1/5 px-4 py-3 text-left text-xs font-bold text-gray-700">English</th>
                                                     <th class="w-16 px-2 py-3 text-center text-xs font-medium text-gray-500">Actions</th>
                                                 </tr>
                                             </thead>
@@ -516,6 +524,11 @@
                                                     <td class="px-4 py-2 border-l border-gray-100 align-top">
                                                         <textarea v-if="row.isEditing" v-model="row.translation" @input="unsavedChanges = true" rows="3" class="w-full text-sm font-gujarati inline-input resize-y"></textarea>
                                                         <div v-else class="text-sm font-gujarati whitespace-pre-wrap text-gray-700 leading-relaxed">{{ row.translation }}</div>
+                                                    </td>
+                                                    <!-- ENGLISH -->
+                                                    <td class="px-4 py-2 border-l border-gray-100 align-top">
+                                                        <textarea v-if="row.isEditing" v-model="row.english" @input="unsavedChanges = true" rows="3" class="w-full text-sm inline-input resize-y"></textarea>
+                                                        <div v-else class="text-sm whitespace-pre-wrap text-gray-700 leading-relaxed">{{ row.english }}</div>
                                                     </td>
                                                     <!-- ACTIONS -->
                                                     <td class="px-2 py-2 text-center border-l border-gray-100 align-top pt-4">

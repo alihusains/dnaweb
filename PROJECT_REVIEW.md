@@ -53,7 +53,8 @@ Before the live site at `alihusains.github.io/dnaweb/` will work, you **must** u
 - **users**: Authentication and RBAC (Admin/Editor).
 - **languages**: Localization settings (code, name, RTL flag).
 - **categories**: Hierarchical content structure (nested folders/leaves).
-- **item_translations**: Content rows for leaf categories (Arabic, Transliteration, Translation).
+- **item_translations**: Content rows for leaf categories (Arabic, Transliteration, Translation, English).
+- **Audit Logging**: Major database updates (categories, items, translations) are logged with user context.
 
 ---
 *Review conducted by Claude Code on 2026-03-14.*

@@ -70,7 +70,7 @@ const app = createApp({
         const translations = ref([]);
         const unsavedChanges = ref(false);
         const deletedTranslationIds = ref([]);
-        const bulkInput = reactive({ arabic: '', transliteration: '', translation: '' });
+        const bulkInput = reactive({ arabic: '', transliteration: '', translation: '', english: '' });
         const categoryMeta = ref({
             audio_url: '', video_url: '', duas_url: '', is_trans: false,
             related1: null, related2: null, notify_hijri_date: '',
@@ -779,6 +779,7 @@ const app = createApp({
                     arabic: row.arabic == null ? '' : String(row.arabic),
                     transliteration: row.transliteration == null ? '' : String(row.transliteration),
                     translation: row.translation == null ? '' : String(row.translation),
+                    english: row.english == null ? '' : String(row.english),
                     is_visible: row.is_visible === 1,
                     isEditing: false
                 }));
@@ -1041,10 +1042,11 @@ const app = createApp({
             const arLines = bulkInput.arabic.split('\n');
             const trLines = bulkInput.transliteration.split('\n');
             const tlLines = bulkInput.translation.split('\n');
+            const enLines = bulkInput.english.split('\n');
 
-            const maxLines = Math.max(arLines.length, trLines.length, tlLines.length);
+            const maxLines = Math.max(arLines.length, trLines.length, tlLines.length, enLines.length);
 
-            if (maxLines === 0 || (bulkInput.arabic === '' && bulkInput.transliteration === '' && bulkInput.translation === '')) {
+            if (maxLines === 0 || (bulkInput.arabic === '' && bulkInput.transliteration === '' && bulkInput.translation === '' && bulkInput.english === '')) {
                 alert("Please paste some text first.");
                 return;
             }
@@ -1057,11 +1059,12 @@ const app = createApp({
                 const ar = (arLines[i] || '').trim();
                 const tr = (trLines[i] || '').trim();
                 const tl = (tlLines[i] || '').trim();
+                const en = (enLines[i] || '').trim();
 
                 // Only skip if we are at the very end and all are empty
                 // (prevents trailing empty rows from extra newlines)
-                if (i >= arLines.length && i >= trLines.length && i >= tlLines.length) continue;
-                if (ar === '' && tr === '' && tl === '' && i === maxLines - 1) continue;
+                if (i >= arLines.length && i >= trLines.length && i >= tlLines.length && i >= enLines.length) continue;
+                if (ar === '' && tr === '' && tl === '' && en === '' && i === maxLines - 1) continue;
 
                 currentSeq++;
                 newTranslations.push({
@@ -1071,6 +1074,7 @@ const app = createApp({
                     arabic: ar,
                     transliteration: tr,
                     translation: tl,
+                    english: en,
                     is_visible: true,
                     isEditing: false
                 });
@@ -1082,6 +1086,7 @@ const app = createApp({
             bulkInput.arabic = '';
             bulkInput.transliteration = '';
             bulkInput.translation = '';
+            bulkInput.english = '';
         };
 
         const addTranslationRow = () => {
@@ -1093,6 +1098,7 @@ const app = createApp({
                 arabic: '',
                 transliteration: '',
                 translation: '',
+                english: '',
                 is_visible: true,
                 isEditing: true // Auto edit mode for new row
             });
@@ -1147,7 +1153,7 @@ const app = createApp({
             const catId = showTranslationsFor.value.id;
 
             const validRows = translations.value.filter(
-                row => row.arabic.trim() !== '' || row.transliteration.trim() !== '' || row.translation.trim() !== ''
+                row => row.arabic.trim() !== '' || row.transliteration.trim() !== '' || row.translation.trim() !== '' || row.english.trim() !== ''
             );
 
             const hasTransliteration = validRows.some(row => row.transliteration.trim() !== '');
@@ -1172,20 +1178,20 @@ const app = createApp({
                         // Update
                         stmts.push({
                             sql: `UPDATE item_translations SET
-                                    sequence = ?, language_title = ?, arabic = ?, translation = ?, transliteration = ?, is_visible = ?
+                                    sequence = ?, language_title = ?, arabic = ?, translation = ?, transliteration = ?, english = ?, is_visible = ?
                                   WHERE id = ?`,
                             args: [
-                                row.sequence, row.language_title.trim(), row.arabic.trim(), row.translation.trim(), row.transliteration.trim(), row.is_visible ? 1 : 0, row.id
+                                row.sequence, row.language_title.trim(), row.arabic.trim(), row.translation.trim(), row.transliteration.trim(), row.english.trim(), row.is_visible ? 1 : 0, row.id
                             ]
                         });
                     } else {
                         // Insert
                         stmts.push({
                             sql: `INSERT INTO item_translations
-                                    (category_id, sequence, language_title, arabic, translation, transliteration, is_visible)
-                                  VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                                    (category_id, sequence, language_title, arabic, translation, transliteration, english, is_visible)
+                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
                             args: [
-                                catId, row.sequence, row.language_title.trim(), row.arabic.trim(), row.translation.trim(), row.transliteration.trim(), row.is_visible ? 1 : 0
+                                catId, row.sequence, row.language_title.trim(), row.arabic.trim(), row.translation.trim(), row.transliteration.trim(), row.english.trim(), row.is_visible ? 1 : 0
                             ]
                         });
                     }

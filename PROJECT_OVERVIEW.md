@@ -24,11 +24,11 @@ A robust Content Management System (CMS) designed to manage hierarchical categor
 ### 2. Content & Translation Management
 - **Multi-language Support**: Switch between languages (e.g., Gujarati, English) to manage specific translations.
 - **Bulk Edit Mode**:
-    - Triple-textarea interface for Arabic, Transliteration, and Translation.
+    - Quad-textarea interface for Arabic, Transliteration, Translation, and English.
     - **Replace Mode**: Overwrites existing content with new line-by-line mapping.
     - **Append Mode**: Adds new lines to existing content.
     - **NULL Mapping**: Blank lines are treated as `NULL` in the database to maintain alignment.
-- **Granular Grid Editing**: Edit, delete, or reorder individual translation rows.
+- **Granular Grid Editing**: Edit, delete, or reorder individual translation rows (Arabic, Transliteration, Translation, English).
 - **Visibility Control**: Toggle individual translation rows as visible/hidden.
 
 ### 3. User & Language Administration
@@ -54,7 +54,7 @@ await dbBatch([
 
 ## Database Schema Highlights
 - `categories`: Stores the hierarchy, names, and metadata. `is_trans` flag indicates if transliteration is available.
-- `item_translations`: Stores the actual content linked by `category_id`. Includes `sequence` for ordering and `language_title`.
+- `item_translations`: Stores the actual content linked by `category_id`. Includes `sequence` for ordering, `language_title`, `arabic`, `transliteration`, `translation`, and `english`.
 - `users`: Stores credentials (`email`, `password_hash`) and `role`.
 - `languages`: Stores available translation target languages.
 
