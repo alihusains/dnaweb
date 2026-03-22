@@ -16,7 +16,7 @@
     <div id="app" v-cloak>
         <!-- Header -->
         <header class="bg-indigo-600 text-white shadow-md sticky top-0 z-50">
-            <div :class="['mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center', showTranslationsFor ? 'max-w-[98%]' : 'max-w-7xl']">
+            <div :class="['mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center', showTranslationsFor ? 'max-w-full' : 'max-w-7xl']">
                 <div class="flex items-center gap-6">
                     <h1 class="text-xl font-bold flex items-center gap-2">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg>
@@ -88,7 +88,7 @@
         </header>
 
         <!-- Main Content Area -->
-        <main :class="['mx-auto py-8', showTranslationsFor ? 'max-w-[98%] px-2' : 'max-w-7xl px-4 sm:px-6 lg:px-8']">
+        <main :class="['mx-auto py-8', showTranslationsFor ? 'max-w-full px-4' : 'max-w-7xl px-4 sm:px-6 lg:px-8']">
 
             <!-- Global Error Banner -->
             <div v-if="error" class="mb-6 bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded shadow-sm relative" role="alert">
@@ -448,28 +448,28 @@
                                             <label class="block text-xs font-bold text-gray-700 mb-1 text-right">Arabic (RTL)</label>
                                             <div class="textarea-wrapper font-arabic textarea-rtl">
                                                 <div class="line-numbers" aria-hidden="true" v-text="getLineNumbers(bulkInput.arabic)"></div>
-                                                <textarea v-model="bulkInput.arabic" rows="6" class="textarea-with-lines" placeholder="Paste Arabic here..."></textarea>
+                                                <textarea v-model="bulkInput.arabic" rows="10" class="textarea-with-lines" placeholder="Paste Arabic here..."></textarea>
                                             </div>
                                         </div>
                                         <div>
                                             <label class="block text-xs font-bold text-gray-700 mb-1">Transliteration</label>
                                             <div class="textarea-wrapper font-transliteration">
                                                 <div class="line-numbers" aria-hidden="true" v-text="getLineNumbers(bulkInput.transliteration)"></div>
-                                                <textarea v-model="bulkInput.transliteration" rows="6" class="textarea-with-lines" placeholder="Paste Transliteration here..."></textarea>
+                                                <textarea v-model="bulkInput.transliteration" rows="10" class="textarea-with-lines" placeholder="Paste Transliteration here..."></textarea>
                                             </div>
                                         </div>
                                         <div>
                                             <label class="block text-xs font-bold text-gray-700 mb-1">Translation</label>
                                             <div class="textarea-wrapper font-gujarati">
                                                 <div class="line-numbers" aria-hidden="true" v-text="getLineNumbers(bulkInput.translation)"></div>
-                                                <textarea v-model="bulkInput.translation" rows="6" class="textarea-with-lines" placeholder="Paste Translation here..."></textarea>
+                                                <textarea v-model="bulkInput.translation" rows="10" class="textarea-with-lines" placeholder="Paste Translation here..."></textarea>
                                             </div>
                                         </div>
                                         <div>
                                             <label class="block text-xs font-bold text-gray-700 mb-1">English</label>
                                             <div class="textarea-wrapper">
                                                 <div class="line-numbers" aria-hidden="true" v-text="getLineNumbers(bulkInput.english)"></div>
-                                                <textarea v-model="bulkInput.english" rows="6" class="textarea-with-lines" placeholder="Paste English here..."></textarea>
+                                                <textarea v-model="bulkInput.english" rows="10" class="textarea-with-lines" placeholder="Paste English here..."></textarea>
                                             </div>
                                         </div>
                                     </div>
