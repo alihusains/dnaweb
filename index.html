@@ -321,7 +321,7 @@
                     </div>
 
                     <!-- VIEW MODE: Translations Content (For Leaves) -->
-                    <div v-if="showTranslationsFor">
+                    <div v-if="showTranslationsFor" class="max-w-[98%] mx-auto">
                         <div class="flex justify-between items-center mb-6">
                             <div class="flex items-center gap-4">
                                 <button @click="closeTranslations" class="bg-white border border-gray-300 text-gray-700 px-3 py-1.5 rounded shadow-sm hover:bg-gray-50 transition text-sm flex items-center gap-1 font-medium">
@@ -346,10 +346,10 @@
                         </div>
 
                         <!-- Split Layout: Meta on Left, Content on Right (on desktop) -->
-                        <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
                             <!-- Left Sidebar: Category Meta -->
-                            <div class="lg:col-span-1 space-y-4">
+                            <div class="lg:col-span-3 xl:col-span-2 space-y-4">
                                 <div class="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
                                     <div class="flex justify-between items-center mb-3">
                                         <h3 class="text-sm font-semibold text-gray-700 uppercase tracking-wider">Category Meta</h3>
@@ -405,6 +405,17 @@
                                             <input v-model="categoryMeta.notify_hijri_date" type="text" placeholder="e.g. 01-10" class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:ring-indigo-500 focus:border-indigo-500">
                                         </div>
 
+                                        <hr class="border-gray-200">
+
+                                        <div class="bg-amber-50 p-3 rounded border border-amber-200">
+                                            <label class="block text-xs font-bold text-amber-800 mb-1 uppercase tracking-tight">Reuse Content From</label>
+                                            <div class="flex gap-1">
+                                                <input v-model="categoryMeta.content_source_id" type="number" placeholder="Enter Category ID" class="flex-1 px-2 py-1 border border-amber-300 rounded text-xs focus:ring-amber-500 focus:border-amber-500 bg-white">
+                                                <button v-if="categoryMeta.content_source_id" @click="viewTranslations({id: categoryMeta.content_source_id})" class="bg-amber-100 text-amber-700 px-2 py-1 rounded text-[10px] hover:bg-amber-200 border border-amber-300" title="View Source">View</button>
+                                            </div>
+                                            <p class="text-[9px] text-amber-600 mt-1 leading-tight">If set, this category mirrors content from the ID provided.</p>
+                                        </div>
+
                                         <div class="flex items-center gap-2 bg-gray-50 p-2 rounded border border-gray-200">
                                             <input v-model="categoryMeta.is_trans" type="checkbox" id="is_trans_flag" class="h-3 w-3 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded">
                                             <label for="is_trans_flag" class="text-xs text-gray-900 font-medium">
@@ -416,7 +427,7 @@
                             </div>
 
                             <!-- Right Content Area: Content Rows -->
-                            <div class="lg:col-span-3 space-y-6">
+                            <div class="lg:col-span-9 xl:col-span-10 space-y-6">
 
                                 <!-- Bulk Input Area -->
                                 <div class="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
@@ -866,6 +877,17 @@
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700 mb-1">English Name</label>
                                     <input v-model="editingCategory.english_name" type="text" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500">
+                                </div>
+
+                                <div class="grid grid-cols-2 gap-4 mt-2">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Reuse Content From (ID)</label>
+                                        <input v-model="editingCategory.content_source_id" type="number" placeholder="Source Category ID" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Sequence</label>
+                                        <input v-model="editingCategory.sequence" type="number" required class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500">
+                                    </div>
                                 </div>
 
                                 <div class="flex items-center gap-2 bg-gray-50 p-3 rounded border border-gray-200 mt-2 mb-2">

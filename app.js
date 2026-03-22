@@ -81,7 +81,7 @@ const app = createApp({
         const bulkInput = reactive({ arabic: '', transliteration: '', translation: '', english: '' });
         const categoryMeta = ref({
             audio_url: '', video_url: '', duas_url: '', is_trans: false,
-            related1: null, related2: null, notify_hijri_date: '',
+            related1: null, related2: null, content_source_id: null, notify_hijri_date: '',
             label1: '', label2: ''
         });
 
@@ -245,6 +245,18 @@ const app = createApp({
             const parts = hash.split("/");
             const view = parts[0] || "categories";
             const id = parts[1];
+
+            // Migration check: Ensure content_source_id column exists
+            try {
+                await dbExecute("SELECT content_source_id FROM categories LIMIT 1");
+            } catch (e) {
+                console.log("Migration: Adding content_source_id column to categories table...");
+                try {
+                    await dbExecute("ALTER TABLE categories ADD COLUMN content_source_id INTEGER DEFAULT NULL");
+                } catch (migrationErr) {
+                    console.error("Migration failed:", migrationErr);
+                }
+            }
 
             // Helper to rebuild breadcrumbs and set current category
             const restoreCategoryState = async (catId) => {
@@ -587,6 +599,7 @@ const app = createApp({
                     local_video_url: category.local_video_url == null ? '' : String(category.local_video_url),
                     related1: category.related1,
                     related2: category.related2,
+                    content_source_id: category.content_source_id,
                     notify_hijri_date: category.notify_hijri_date == null ? '' : String(category.notify_hijri_date),
                     label1: category.label1 == null ? '' : String(category.label1),
                     label2: category.label2 == null ? '' : String(category.label2),
@@ -606,7 +619,7 @@ const app = createApp({
                     lang_name: '',
                     english_name: '',
                     audio_url: '', video_url: '', duas_url: '', local_audio_url: '', local_video_url: '',
-                    related1: null, related2: null, notify_hijri_date: '', label1: '', label2: '',
+                    related1: null, related2: null, content_source_id: null, notify_hijri_date: '', label1: '', label2: '',
                     is_trans: 0,
                     is_last_level: false,
                     language_code: selectedLanguageCode.value
@@ -631,7 +644,7 @@ const app = createApp({
                                 lang_name = ?, english_name = ?,
                                 audio_url = ?, video_url = ?, duas_url = ?,
                                 local_audio_url = ?, local_video_url = ?,
-                                related1 = ?, related2 = ?, notify_hijri_date = ?, label1 = ?, label2 = ?,
+                                related1 = ?, related2 = ?, content_source_id = ?, notify_hijri_date = ?, label1 = ?, label2 = ?,
                                 is_last_level = ?, is_trans = ?, language_code = ?
                               WHERE id = ?`,
                         args: [
@@ -644,6 +657,7 @@ const app = createApp({
                             editingCategory.value.local_video_url || null,
                             editingCategory.value.related1 || null,
                             editingCategory.value.related2 || null,
+                            editingCategory.value.content_source_id || null,
                             editingCategory.value.notify_hijri_date || null,
                             editingCategory.value.label1 || null,
                             editingCategory.value.label2 || null,
@@ -656,8 +670,8 @@ const app = createApp({
                 } else {
                     await dbExecute({
                         sql: `INSERT INTO categories
-                                (parent_id, sequence, lang_name, english_name, audio_url, video_url, duas_url, local_audio_url, local_video_url, related1, related2, notify_hijri_date, label1, label2, is_last_level, is_trans, language_code)
-                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                                (parent_id, sequence, lang_name, english_name, audio_url, video_url, duas_url, local_audio_url, local_video_url, related1, related2, content_source_id, notify_hijri_date, label1, label2, is_last_level, is_trans, language_code)
+                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                         args: [
                             editingCategory.value.parent_id,
                             editingCategory.value.sequence,
@@ -670,6 +684,7 @@ const app = createApp({
                             editingCategory.value.local_video_url || null,
                             editingCategory.value.related1 || null,
                             editingCategory.value.related2 || null,
+                            editingCategory.value.content_source_id || null,
                             editingCategory.value.notify_hijri_date || null,
                             editingCategory.value.label1 || null,
                             editingCategory.value.label2 || null,
@@ -812,9 +827,16 @@ const app = createApp({
             error.value = null;
 
             try {
+                // Check if this category reuses content from another source
+                let sourceId = showTranslationsFor.value.id;
+                if (showTranslationsFor.value.content_source_id) {
+                    sourceId = showTranslationsFor.value.content_source_id;
+                    console.log(`Reusing content from category ID: ${sourceId}`);
+                }
+
                 const result = await dbExecute({
                     sql: 'SELECT * FROM item_translations WHERE category_id = ? ORDER BY sequence ASC',
-                    args: [showTranslationsFor.value.id]
+                    args: [sourceId]
                 });
 
                 translations.value = result.rows.map(row => ({
@@ -853,7 +875,7 @@ const app = createApp({
                 await dbExecute({
                     sql: `UPDATE categories SET
                             audio_url = ?, video_url = ?, duas_url = ?,
-                            related1 = ?, related2 = ?, notify_hijri_date = ?, label1 = ?, label2 = ?,
+                            related1 = ?, related2 = ?, content_source_id = ?, notify_hijri_date = ?, label1 = ?, label2 = ?,
                             is_trans = ?
                           WHERE id = ?`,
                     args: [
@@ -862,6 +884,7 @@ const app = createApp({
                         categoryMeta.value.duas_url || null,
                         categoryMeta.value.related1 || null,
                         categoryMeta.value.related2 || null,
+                        categoryMeta.value.content_source_id || null,
                         categoryMeta.value.notify_hijri_date || null,
                         categoryMeta.value.label1 || null,
                         categoryMeta.value.label2 || null,
