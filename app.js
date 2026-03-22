@@ -1083,6 +1083,72 @@ const app = createApp({
             return Array.from({length: linesCount}, (_, i) => i + 1).join('\n');
         };
 
+        const importFromCsv = async () => {
+            const csvUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRRY1f7ZXQDFDuI3ski7y0XK5atAbFmL24jIf_CL8_Vl2EOxE3TyVrZ4gllmMk8Ly8XKblaDIm3kW8X/pub?gid=2082459828&single=true&output=csv';
+
+            try {
+                isLoading.value = true;
+                const response = await fetch(csvUrl);
+                if (!response.ok) throw new Error('Failed to fetch CSV');
+                const csvText = await response.text();
+
+                // Simple CSV parser that handles quotes
+                const lines = csvText.split(/\r?\n/);
+                if (lines.length <= 1) return;
+
+                const parseLine = (line) => {
+                    const parts = [];
+                    let current = '';
+                    let inQuotes = false;
+                    for (let i = 0; i < line.length; i++) {
+                        const char = line[i];
+                        if (char === '"') {
+                            if (inQuotes && line[i+1] === '"') { // escaped quote
+                                current += '"';
+                                i++;
+                            } else {
+                                inQuotes = !inQuotes;
+                            }
+                        } else if (char === ',' && !inQuotes) {
+                            parts.push(current);
+                            current = '';
+                        } else {
+                            current += char;
+                        }
+                    }
+                    parts.push(current);
+                    return parts.map(p => p.trim().replace(/^"(.*)"$/, '$1'));
+                };
+
+                const arabic = [];
+                const transliteration = [];
+                const translation = [];
+                const english = [];
+
+                // Skip header line
+                for (let i = 1; i < lines.length; i++) {
+                    if (!lines[i].trim()) continue;
+                    const [ar, tr, tl, en] = parseLine(lines[i]);
+                    arabic.push(ar || '');
+                    transliteration.push(tr || '');
+                    translation.push(tl || '');
+                    english.push(en || '');
+                }
+
+                bulkInput.arabic = arabic.join('\n');
+                bulkInput.transliteration = transliteration.join('\n');
+                bulkInput.translation = translation.join('\n');
+                bulkInput.english = english.join('\n');
+
+                alert(`Successfully imported ${arabic.length} rows from CSV! Review and click "Process & Align Grid" below.`);
+            } catch (err) {
+                console.error(err);
+                alert('Error importing CSV: ' + err.message);
+            } finally {
+                isLoading.value = false;
+            }
+        };
+
         const processBulkTranslations = () => {
             const arEmpty = bulkInput.arabic.trim() === '';
             const trEmpty = bulkInput.transliteration.trim() === '';
@@ -1293,7 +1359,7 @@ const app = createApp({
 
             showTranslationsFor, translations, unsavedChanges, bulkInput, selectedLanguageId, selectedLanguageName, categoryMeta,
             viewTranslations, closeTranslations, processBulkTranslations, getLineNumbers,
-            addTranslationRow, removeTranslationRow, toggleEditTranslation, copySql, sortTranslations, saveTranslations, saveCategoryMeta,
+            importFromCsv, addTranslationRow, removeTranslationRow, toggleEditTranslation, copySql, sortTranslations, saveTranslations, saveCategoryMeta,
 
             availableTables, githubToken, dbSharingSettings, dbSharingPresets, latestPublishedDb, publishedReleases, currentDbVersion,
             triggerPublishWorkflow, savePreset, loadPreset, deletePreset, copyToClipboard, updateHash
