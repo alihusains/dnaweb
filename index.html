@@ -524,11 +524,15 @@
                                                     <td class="px-2 py-2 border-l border-gray-100 align-top">
                                                         <div v-if="row.isEditing" class="space-y-2">
                                                             <div>
+                                                                <label class="text-[10px] text-indigo-500 font-bold uppercase tracking-wide block mb-0.5">Move to Cat:</label>
+                                                                <input v-model="row.category_name" list="all-categories-list" @input="updateRowCategoryId(row)" class="w-full text-[10px] p-1 border border-indigo-200 rounded bg-indigo-50" placeholder="Target cat name...">
+                                                            </div>
+                                                            <div>
                                                                 <label class="text-[10px] text-gray-500 uppercase tracking-wide block mb-1">Title</label>
                                                                 <input v-model="row.language_title" type="text" class="inline-input p-1 text-xs" @input="unsavedChanges = true">
                                                             </div>
                                                             <div class="flex items-center gap-1 mt-2">
-                                                                <input v-model="row.is_visible" type="checkbox" :id="'vis-'+index" class="h-3 w-3 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded" @change="unsavedChanges = true">
+                                                                <input v-model="row.is_visible" type="checkbox" :id="'vis-'+index" class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded" @change="unsavedChanges = true">
                                                                 <label :for="'vis-'+index" class="text-[10px] text-gray-600 uppercase tracking-wide">Visible</label>
                                                             </div>
                                                         </div>
@@ -879,6 +883,12 @@
                                     <input v-model="editingCategory.english_name" type="text" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500">
                                 </div>
 
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Move to Category (Parent)</label>
+                                    <input v-model="editingCategory.parent_name" list="all-categories-list" @input="updateParentId" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500" placeholder="Type or select a category...">
+                                    <input type="hidden" v-model="editingCategory.parent_id">
+                                </div>
+
                                 <div class="grid grid-cols-2 gap-4 mt-2">
                                     <div>
                                         <label class="block text-sm font-medium text-gray-700 mb-1">Reuse Content From (ID)</label>
@@ -1085,6 +1095,11 @@
                 </div>
             </div>
         </div>
+
+        <!-- Datalist for searchable category dropdown -->
+        <datalist id="all-categories-list">
+            <option v-for="cat in allCategories" :key="cat.id" :value="cat.english_name"></option>
+        </datalist>
 
     </div>
 

@@ -73,6 +73,7 @@ const app = createApp({
 
         const draggedIndex = ref(null);
         const dropTargetIndex = ref(null);
+        const allCategories = ref([]);
 
         const showTranslationsFor = ref(null);
         const translations = ref([]);
@@ -258,6 +259,9 @@ const app = createApp({
                 }
             }
 
+            // Ensure categories are loaded for move dropdowns
+            fetchAllCategories();
+
             // Helper to rebuild breadcrumbs and set current category
             const restoreCategoryState = async (catId) => {
                 if (!catId) return null;
@@ -424,6 +428,7 @@ const app = createApp({
             if (newVal) {
                 localStorage.setItem('selectedLanguageId', newVal);
                 if (isLoggedIn.value) {
+                    await fetchAllCategories();
                     if (currentView.value === 'translations' || showTranslationsFor.value) {
                         await fetchTranslationsForCategoryAndLanguage();
                     } else if (currentView.value === 'categories') {
@@ -584,7 +589,8 @@ const app = createApp({
         };
 
         // --- Category CRUD ---
-        const openCategoryModal = (category = null) => {
+        const openCategoryModal = async (category = null) => {
+            await fetchAllCategories();
             if (category) {
                 editingCategory.value = {
                     id: category.id,
@@ -607,6 +613,9 @@ const app = createApp({
                     is_last_level: category.is_last_level,
                     language_code: category.language_code || selectedLanguageCode.value
                 };
+                // Find parent name for the move dropdown
+                const parent = allCategories.value.find(p => p.id === category.parent_id);
+                editingCategory.value.parent_name = parent ? parent.english_name : '';
             } else {
                 let maxSeq = 0;
                 if (categories.value.length > 0) {
@@ -622,7 +631,8 @@ const app = createApp({
                     related1: null, related2: null, content_source_id: null, notify_hijri_date: '', label1: '', label2: '',
                     is_trans: 0,
                     is_last_level: false,
-                    language_code: selectedLanguageCode.value
+                    language_code: selectedLanguageCode.value,
+                    parent_name: currentCategory.value ? currentCategory.value.english_name : ''
                 };
             }
             showCategoryModal.value = true;
@@ -641,13 +651,14 @@ const app = createApp({
                 if (editingCategory.value.id) {
                     await dbExecute({
                         sql: `UPDATE categories SET
-                                lang_name = ?, english_name = ?,
+                                parent_id = ?, lang_name = ?, english_name = ?,
                                 audio_url = ?, video_url = ?, duas_url = ?,
                                 local_audio_url = ?, local_video_url = ?,
                                 related1 = ?, related2 = ?, content_source_id = ?, notify_hijri_date = ?, label1 = ?, label2 = ?,
                                 is_last_level = ?, is_trans = ?, language_code = ?
                               WHERE id = ?`,
                         args: [
+                            editingCategory.value.parent_id,
                             editingCategory.value.lang_name,
                             editingCategory.value.english_name,
                             editingCategory.value.audio_url || null,
@@ -703,6 +714,7 @@ const app = createApp({
                 }
 
                 await fetchCategories(currentCategory.value ? currentCategory.value.id : null);
+                await fetchAllCategories();
             } catch (err) {
                 error.value = "Failed to save category: " + err.message;
             } finally {
@@ -722,10 +734,26 @@ const app = createApp({
                     args: [category.id]
                 });
                 await fetchCategories(currentCategory.value ? currentCategory.value.id : null);
+                await fetchAllCategories();
             } catch (err) {
                 error.value = "Failed to delete: " + err.message;
             } finally {
                 isLoading.value = false;
+            }
+        };
+
+        const fetchAllCategories = async () => {
+            try {
+                const result = await dbExecute({
+                    sql: "SELECT id, english_name FROM categories WHERE language_code = ? ORDER BY english_name ASC",
+                    args: [selectedLanguageCode.value]
+                });
+                allCategories.value = result.rows.map(row => ({
+                    id: row.id,
+                    english_name: row.english_name == null ? '' : String(row.english_name)
+                }));
+            } catch (err) {
+                console.error("Failed to fetch all categories:", err);
             }
         };
 
@@ -783,6 +811,7 @@ const app = createApp({
 
         // --- Content Management (Translations & Meta) ---
         const viewTranslations = async (category, shouldUpdateHash = true) => {
+            await fetchAllCategories();
             showTranslationsFor.value = category;
             unsavedChanges.value = false;
             deletedTranslationIds.value = [];
@@ -839,17 +868,21 @@ const app = createApp({
                     args: [sourceId]
                 });
 
-                translations.value = result.rows.map(row => ({
-                    id: row.id,
-                    sequence: row.sequence,
-                    language_title: row.language_title == null ? '' : String(row.language_title),
-                    arabic: row.arabic == null ? '' : String(row.arabic),
-                    transliteration: row.transliteration == null ? '' : String(row.transliteration),
-                    translation: row.translation == null ? '' : String(row.translation),
-                    english: row.english == null ? '' : String(row.english),
-                    is_visible: row.is_visible === 1,
-                    isEditing: false
-                }));
+                translations.value = result.rows.map(row => {
+                    const catMatch = allCategories.value.find(c => c.id === row.category_id);
+                    return {
+                        id: row.id,
+                        sequence: row.sequence,
+                        language_title: row.language_title == null ? '' : String(row.language_title),
+                        arabic: row.arabic == null ? '' : String(row.arabic),
+                        transliteration: row.transliteration == null ? '' : String(row.transliteration),
+                        translation: row.translation == null ? '' : String(row.translation),
+                        english: row.english == null ? '' : String(row.english),
+                        category_name: catMatch ? catMatch.english_name : '',
+                        is_visible: row.is_visible === 1,
+                        isEditing: false
+                    };
+                });
             } catch (err) {
                 error.value = "Failed to load content: " + err.message;
             } finally {
@@ -1254,7 +1287,14 @@ const app = createApp({
         };
 
         const toggleEditTranslation = (index) => {
-            translations.value[index].isEditing = !translations.value[index].isEditing;
+            fetchAllCategories();
+            const row = translations.value[index];
+            row.isEditing = !row.isEditing;
+            if (row.isEditing) {
+                // Initialize category name for the move dropdown
+                const cat = allCategories.value.find(c => c.id === showTranslationsFor.value.id);
+                row.category_name = cat ? cat.english_name : '';
+            }
             unsavedChanges.value = true;
         };
 
@@ -1313,14 +1353,15 @@ const app = createApp({
 
                 // 2. Process Inserts/Updates
                 validRows.forEach((row) => {
+                    const targetCatId = row.new_category_id || catId;
                     if (row.id) {
                         // Update
                         stmts.push({
                             sql: `UPDATE item_translations SET
-                                    sequence = ?, language_title = ?, arabic = ?, translation = ?, transliteration = ?, english = ?, is_visible = ?
+                                    category_id = ?, sequence = ?, language_title = ?, arabic = ?, translation = ?, transliteration = ?, english = ?, is_visible = ?
                                   WHERE id = ?`,
                             args: [
-                                row.sequence, row.language_title.trim(), row.arabic == null ? null : row.arabic.trim(), row.translation == null ? null : row.translation.trim(), row.transliteration == null ? null : row.transliteration.trim(), row.english == null ? null : row.english.trim(), row.is_visible ? 1 : 0, row.id
+                                targetCatId, row.sequence, row.language_title.trim(), row.arabic == null ? null : row.arabic.trim(), row.translation == null ? null : row.translation.trim(), row.transliteration == null ? null : row.transliteration.trim(), row.english == null ? null : row.english.trim(), row.is_visible ? 1 : 0, row.id
                             ]
                         });
                     } else {
@@ -1330,7 +1371,7 @@ const app = createApp({
                                     (category_id, sequence, language_title, arabic, translation, transliteration, english, is_visible)
                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
                             args: [
-                                catId, row.sequence, row.language_title.trim(), row.arabic == null ? null : row.arabic.trim(), row.translation == null ? null : row.translation.trim(), row.transliteration == null ? null : row.transliteration.trim(), row.english == null ? null : row.english.trim(), row.is_visible ? 1 : 0
+                                targetCatId, row.sequence, row.language_title.trim(), row.arabic == null ? null : row.arabic.trim(), row.translation == null ? null : row.translation.trim(), row.transliteration == null ? null : row.transliteration.trim(), row.english == null ? null : row.english.trim(), row.is_visible ? 1 : 0
                             ]
                         });
                     }
@@ -1359,6 +1400,22 @@ const app = createApp({
             }
         };
 
+        const updateParentId = () => {
+            const match = allCategories.value.find(c => c.english_name === editingCategory.value.parent_name);
+            editingCategory.value.parent_id = match ? match.id : null;
+            unsavedChanges.value = true;
+        };
+
+        const updateRowCategoryId = (row) => {
+            const match = allCategories.value.find(c => c.english_name === row.category_name);
+            if (match) {
+                row.new_category_id = match.id;
+            } else {
+                row.new_category_id = null;
+            }
+            unsavedChanges.value = true;
+        };
+
         return {
             dbUrl, authToken, isDbConnected, isLoggedIn, isLoading, error, currentUser, loginForm,
             connectDb, disconnectDb, userLogin, logout,
@@ -1374,14 +1431,16 @@ const app = createApp({
             categories, breadcrumbs, currentCategory,
             fetchCategories, openCategory, goToBreadcrumb,
 
-            showCategoryModal, editingCategory, openCategoryModal, closeCategoryModal, saveCategory, deleteCategory,
+            showCategoryModal, editingCategory, openCategoryModal, closeCategoryModal, saveCategory, deleteCategory, fetchAllCategories,
 
             mediaTestUrl, mediaTestType, testMedia, showExportModal,
 
             dragStart, dragOver, drop, draggedIndex, dropTargetIndex,
+            allCategories,
 
             showTranslationsFor, translations, unsavedChanges, bulkInput, selectedLanguageId, selectedLanguageName, categoryMeta,
             viewTranslations, closeTranslations, processBulkTranslations, getLineNumbers,
+            updateParentId, updateRowCategoryId,
             importFromCsv, addTranslationRow, removeTranslationRow, toggleEditTranslation, copySql, sortTranslations, saveTranslations, saveCategoryMeta,
 
             availableTables, githubToken, dbSharingSettings, dbSharingPresets, latestPublishedDb, publishedReleases, currentDbVersion,
