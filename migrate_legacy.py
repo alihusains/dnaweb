@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Migrate legacy.sqlite to production schema format.
+Migrate legacy.sqlite to production schema format with ID preservation.
 
 Legacy tables:
   - v2: 3-level hierarchy (level1/level2/level3) with Gujarati content
@@ -12,6 +12,11 @@ Production tables:
   - item_translations: Quad-column (arabic, transliteration, translation, english)
   - languages: Language definitions
   - users: Admin users (not migrated)
+
+Backward compatibility:
+  - v2.id is preserved as item_translations.id (offset by QURAN_ID_OFFSET for quran)
+  - legacy_bookmark_map table maps (source_table, legacy_id) → new item_translations.id
+  - Apps can query: SELECT new_id FROM legacy_bookmark_map WHERE source='v2' AND legacy_id=?
 """
 
 import sqlite3
@@ -20,6 +25,11 @@ from pathlib import Path
 
 LEGACY_DB = "legacy.sqlite"
 OUTPUT_DB = "migrated.sqlite"
+
+# Offset quran IDs to avoid collision with v2 IDs
+# v2 has ~1078 rows, duplicates may push IDs higher
+# Use 500000 to be well out of range
+QURAN_ID_OFFSET = 500000
 
 
 def create_production_schema(conn):
@@ -77,15 +87,25 @@ def create_production_schema(conn):
             github_token TEXT
         );
 
+        CREATE TABLE IF NOT EXISTS legacy_bookmark_map (
+            source_table TEXT NOT NULL,
+            legacy_id INTEGER NOT NULL,
+            new_category_id INTEGER,
+            new_item_id INTEGER,
+            legacy_title TEXT,
+            PRIMARY KEY (source_table, legacy_id)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_categories_parent ON categories(parent_id);
         CREATE INDEX IF NOT EXISTS idx_categories_sequence ON categories(sequence);
         CREATE INDEX IF NOT EXISTS idx_categories_language_code ON categories(language_code);
         CREATE INDEX IF NOT EXISTS idx_categories_english_name ON categories(english_name);
         CREATE INDEX IF NOT EXISTS idx_item_translations_category ON item_translations(category_id);
         CREATE INDEX IF NOT EXISTS idx_item_translations_sequence ON item_translations(category_id, sequence);
+        CREATE INDEX IF NOT EXISTS idx_bookmark_new_item ON legacy_bookmark_map(new_item_id);
+        CREATE INDEX IF NOT EXISTS idx_bookmark_new_cat ON legacy_bookmark_map(new_category_id);
     """)
 
-    # Insert default language
     cur.execute("INSERT INTO languages (id, code, name, is_rtl) VALUES (1, 'gu', 'Gujarati', 0)")
     cur.execute("INSERT INTO languages (id, code, name, is_rtl) VALUES (2, 'en', 'English', 0)")
 
@@ -117,12 +137,11 @@ def get_or_create_category(cur, categories_cache, parent_id, lang_name, english_
 
 
 def migrate_v2(legacy_conn, output_conn):
-    """Migrate v2 table → categories + item_translations."""
+    """Migrate v2 table → categories + item_translations with preserved IDs."""
     print("Migrating v2 (duas, ziyarat, namaz)...")
     legacy_cur = legacy_conn.cursor()
     output_cur = output_conn.cursor()
 
-    # Fetch all v2 rows ordered by position
     legacy_cur.execute("""
         SELECT id, l1position, l2position, l3position,
                level1, level2, level3, Title,
@@ -137,9 +156,9 @@ def migrate_v2(legacy_conn, output_conn):
     """)
     rows = legacy_cur.fetchall()
 
-    categories_cache = {}  # (parent_id, lang_name, english_name, lang_code) → id
-    level1_cache = {}      # level1 name → category_id
-    level2_cache = {}      # (level1_name, level2_name) → category_id
+    categories_cache = {}
+    level1_cache = {}
+    level2_cache = {}
     migrated_items = 0
     migrated_categories = 0
 
@@ -149,6 +168,7 @@ def migrate_v2(legacy_conn, output_conn):
          guj_transliteration, guj_translation, guj_arabic,
          audio_url, video_url, duas_url) = row
 
+        legacy_id = int(row_id) if row_id and str(row_id).isdigit() else 0
         level1 = (level1 or '').strip()
         level2 = (level2 or '').strip()
         level3 = (level3 or '').strip()
@@ -157,7 +177,7 @@ def migrate_v2(legacy_conn, output_conn):
         if not level1:
             continue
 
-        # Level 1 category (top-level)
+        # Level 1 category
         if level1 not in level1_cache:
             l1_seq = int(l1pos) if l1pos and l1pos.isdigit() else 0
             cat_id = get_or_create_category(
@@ -174,7 +194,7 @@ def migrate_v2(legacy_conn, output_conn):
 
         parent_id = level1_cache[level1]
 
-        # Level 2 category (if exists)
+        # Level 2 category
         l2_key = (level1, level2)
         if level2 and l2_key not in level2_cache:
             l2_seq = int(l2pos) if l2pos and l2pos.isdigit() else 0
@@ -197,12 +217,11 @@ def migrate_v2(legacy_conn, output_conn):
         if level2:
             parent_id = level2_cache[l2_key]
 
-        # Level 3 category or leaf content
+        # Level 3 category or leaf
         if level3:
             l3_key = (level1, level2, level3)
             l3_seq = int(l3pos) if l3pos and l3pos.isdigit() else 0
 
-            # Check if this level3 already exists
             if l3_key not in categories_cache:
                 cat_id = get_or_create_category(
                     output_cur, categories_cache,
@@ -217,47 +236,69 @@ def migrate_v2(legacy_conn, output_conn):
                     duas_url=duas_url,
                     is_trans=1 if (guj_arabic or guj_translation) else 0
                 )
-                level2_cache[l3_key] = cat_id  # reuse for content lookup
+                level2_cache[l3_key] = cat_id
                 migrated_categories += 1
 
             content_cat_id = level2_cache[l3_key]
         elif not level2:
-            # Direct under level1, no level2 or level3
             content_cat_id = parent_id
         else:
             content_cat_id = parent_id
 
-        # Create item_translation if content exists
+        # Insert item_translation with PRESERVED legacy ID
         has_content = any([title, guj_arabic, guj_transliteration, guj_translation])
         if has_content:
-            # Get next sequence for this category
             output_cur.execute(
                 "SELECT COALESCE(MAX(sequence), 0) FROM item_translations WHERE category_id = ?",
                 (content_cat_id,)
             )
             next_seq = output_cur.fetchone()[0] + 1
 
+            # Check if this legacy_id already exists (duplicate in legacy data)
+            output_cur.execute("SELECT id FROM item_translations WHERE id = ?", (legacy_id,))
+            if output_cur.fetchone():
+                # Duplicate legacy ID — assign a new ID in the v2 safe range
+                # v2 IDs go up to ~1100, use 2000+ for overflow
+                overflow_id = 2000
+                while True:
+                    output_cur.execute("SELECT id FROM item_translations WHERE id = ?", (overflow_id,))
+                    if not output_cur.fetchone():
+                        break
+                    overflow_id += 1
+                new_id = overflow_id
+            else:
+                new_id = legacy_id
+
             output_cur.execute("""
                 INSERT INTO item_translations
-                    (category_id, sequence, language_title, arabic, transliteration, translation, english, is_visible)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+                    (id, category_id, sequence, language_title, arabic, transliteration, translation, english, is_visible)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
             """, (
+                new_id,
                 content_cat_id, next_seq,
                 title or None,
                 guj_arabic or None,
                 guj_transliteration or None,
                 guj_translation or None,
-                None  # english not in legacy
+                None
             ))
+
+            # Record in bookmark map (both legacy_id and new_id if different)
+            output_cur.execute("""
+                INSERT OR REPLACE INTO legacy_bookmark_map
+                    (source_table, legacy_id, new_category_id, new_item_id, legacy_title)
+                VALUES (?, ?, ?, ?, ?)
+            """, ('v2', legacy_id, content_cat_id, new_id, title or level3 or level2 or level1))
+
             migrated_items += 1
 
     output_conn.commit()
-    print(f"  v2: {migrated_categories} categories, {migrated_items} translation items created")
+    print(f"  v2: {migrated_categories} categories, {migrated_items} translation items (IDs preserved)")
     return migrated_categories, migrated_items
 
 
 def migrate_quran(legacy_conn, output_conn):
-    """Migrate quran_final table → categories + item_translations."""
+    """Migrate quran_final table → categories + item_translations with preserved IDs."""
     print("Migrating quran_final...")
     legacy_cur = legacy_conn.cursor()
     output_cur = output_conn.cursor()
@@ -280,9 +321,9 @@ def migrate_quran(legacy_conn, output_conn):
     """)
     quran_root_id = output_cur.lastrowid
 
-    sura_cache = {}  # sura_id → category_id
+    sura_cache = {}
     migrated_items = 0
-    migrated_categories = 1  # root
+    migrated_categories = 1
 
     for row in rows:
         (row_id, sura_id, ayat_no, ayat_ar, ayat_guj, transliteration,
@@ -290,11 +331,15 @@ def migrate_quran(legacy_conn, output_conn):
          juz_no, ruku_no, page_no, sura_type, sura_ayat,
          surawise_audio, video, juz_audio_1, juz_audio_2) = row
 
+        legacy_id = int(row_id) if row_id and str(row_id).isdigit() else 0
+        # Offset quran IDs to avoid collision with v2 IDs
+        new_item_id = legacy_id + QURAN_ID_OFFSET
+
         sura_id_str = str(sura_id).strip() if sura_id else '0'
         sura_name_guj = (sura_name_guj or '').strip()
         sura_name_ar = (sura_name_ar or '').strip()
 
-        # Create per-sura category if not exists
+        # Create per-sura category
         if sura_id_str not in sura_cache:
             output_cur.execute("""
                 INSERT INTO categories (parent_id, sequence, lang_name, english_name,
@@ -313,12 +358,13 @@ def migrate_quran(legacy_conn, output_conn):
 
         cat_id = sura_cache[sura_id_str]
 
-        # Insert ayat as translation item
+        # Insert ayat with offset legacy ID
         output_cur.execute("""
             INSERT INTO item_translations
-                (category_id, sequence, language_title, arabic, transliteration, translation, english, is_visible)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+                (id, category_id, sequence, language_title, arabic, transliteration, translation, english, is_visible)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
         """, (
+            new_item_id,
             cat_id,
             int(ayat_no) if ayat_no and str(ayat_no).isdigit() else 0,
             f'Ayat {ayat_no}' if ayat_no else None,
@@ -327,10 +373,18 @@ def migrate_quran(legacy_conn, output_conn):
             ayat_guj or None,
             ayat_notes or None,
         ))
+
+        # Record in bookmark map
+        output_cur.execute("""
+            INSERT OR REPLACE INTO legacy_bookmark_map
+                (source_table, legacy_id, new_category_id, new_item_id, legacy_title)
+            VALUES (?, ?, ?, ?, ?)
+        """, ('quran_final', legacy_id, cat_id, new_item_id, f'Sura {sura_id_str} Ayat {ayat_no}'))
+
         migrated_items += 1
 
     output_conn.commit()
-    print(f"  quran_final: {migrated_categories} categories, {migrated_items} ayat items created")
+    print(f"  quran_final: {migrated_categories} categories, {migrated_items} ayat items (IDs offset by {QURAN_ID_OFFSET})")
     return migrated_categories, migrated_items
 
 
@@ -341,14 +395,13 @@ def migrate_events(legacy_conn, output_conn):
     output_cur = output_conn.cursor()
 
     legacy_cur.execute("""
-        SELECT date, date_long, event, color, deeplink_id_text,
+        SELECT rowid, date, date_long, event, color, deeplink_id_text,
                link_type, deeplink_id, event_type
         FROM events
         ORDER BY date
     """)
     rows = legacy_cur.fetchall()
 
-    # Create top-level "Events" category
     output_cur.execute("""
         INSERT INTO categories (parent_id, sequence, lang_name, english_name,
             is_trans, is_last_level, language_code)
@@ -359,7 +412,7 @@ def migrate_events(legacy_conn, output_conn):
     migrated_items = 0
 
     for row in rows:
-        (date, date_long, event, color, deeplink_id_text,
+        (rowid, date, date_long, event, color, deeplink_id_text,
          link_type, deeplink_id, event_type) = row
 
         event = (event or '').strip()
@@ -369,7 +422,6 @@ def migrate_events(legacy_conn, output_conn):
         if not event:
             continue
 
-        # Each event becomes a leaf category with translation
         output_cur.execute("""
             INSERT INTO categories (parent_id, sequence, lang_name, english_name,
                 notify_hijri_date, is_trans, is_last_level, language_code)
@@ -378,28 +430,56 @@ def migrate_events(legacy_conn, output_conn):
             events_root_id,
             migrated_categories,
             date_long or date,
-            event[:100],  # english_name is shorter
+            event[:100],
             date,
         ))
         cat_id = output_cur.lastrowid
         migrated_categories += 1
 
-        # Event detail as translation
         output_cur.execute("""
             INSERT INTO item_translations
                 (category_id, sequence, language_title, arabic, translation, is_visible)
             VALUES (?, 1, ?, ?, ?, 1)
-        """, (
-            cat_id,
-            date_long or date,
-            None,
-            event,
-        ))
+        """, (cat_id, date_long or date, None, event))
+
+        item_id = output_cur.lastrowid
         migrated_items += 1
 
+        # Events don't have legacy IDs, but record by rowid for completeness
+        output_cur.execute("""
+            INSERT OR REPLACE INTO legacy_bookmark_map
+                (source_table, legacy_id, new_category_id, new_item_id, legacy_title)
+            VALUES (?, ?, ?, ?, ?)
+        """, ('events', rowid, cat_id, item_id, date_long or date))
+
     output_conn.commit()
-    print(f"  events: {migrated_categories} categories, {migrated_items} event items created")
+    print(f"  events: {migrated_categories} categories, {migrated_items} event items")
     return migrated_categories, migrated_items
+
+
+def print_bookmark_examples(output_conn):
+    """Show sample bookmark mappings for verification."""
+    cur = output_conn.cursor()
+    print("\n--- Bookmark mapping samples ---")
+    cur.execute("""
+        SELECT source_table, legacy_id, new_item_id, legacy_title
+        FROM legacy_bookmark_map
+        WHERE source_table = 'v2'
+        LIMIT 5
+    """)
+    print("v2 bookmarks:")
+    for row in cur.fetchall():
+        print(f"  legacy v2.id={row[1]} → item_translations.id={row[2]} | {row[3][:50]}")
+
+    cur.execute("""
+        SELECT source_table, legacy_id, new_item_id, legacy_title
+        FROM legacy_bookmark_map
+        WHERE source_table = 'quran_final'
+        LIMIT 5
+    """)
+    print("quran_final bookmarks:")
+    for row in cur.fetchall():
+        print(f"  legacy quran.id={row[1]} → item_translations.id={row[2]} | {row[3]}")
 
 
 def main():
@@ -443,10 +523,21 @@ def main():
 
         # Verify
         cur = output_conn.cursor()
-        for table in ['categories', 'item_translations', 'languages']:
+        for table in ['categories', 'item_translations', 'languages', 'legacy_bookmark_map']:
             cur.execute(f"SELECT COUNT(*) FROM {table}")
             count = cur.fetchone()[0]
             print(f"  {table}: {count} rows")
+
+        print_bookmark_examples(output_conn)
+
+        # Show how to migrate bookmarks
+        print("\n--- Bookmark migration query ---")
+        print("To find the new item_translations.id for a legacy bookmark:")
+        print("  SELECT new_item_id FROM legacy_bookmark_map")
+        print("  WHERE source_table='v2' AND legacy_id=<old_bookmark_id>;")
+        print("")
+        print("  SELECT new_item_id FROM legacy_bookmark_map")
+        print("  WHERE source_table='quran_final' AND legacy_id=<old_bookmark_id>;")
 
     finally:
         legacy_conn.close()
