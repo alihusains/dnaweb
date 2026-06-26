@@ -62,7 +62,7 @@ def create_production_schema(conn):
             label1 TEXT,
             label2 TEXT,
             is_last_level INTEGER DEFAULT 0,
-            language_code TEXT DEFAULT 'en',
+            language_code TEXT DEFAULT 'gu',
             content_source_id INTEGER DEFAULT NULL
         );
 
@@ -82,8 +82,8 @@ def create_production_schema(conn):
             id INTEGER PRIMARY KEY,
             email TEXT NOT NULL,
             password_hash TEXT NOT NULL,
-            role TEXT NOT NULL DEFAULT 'editor',
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            role TEXT DEFAULT 'editor',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             github_token TEXT
         );
 
@@ -96,18 +96,19 @@ def create_production_schema(conn):
             PRIMARY KEY (source_table, legacy_id)
         );
 
+        CREATE INDEX IF NOT EXISTS idx_categories_english_name ON categories(english_name);
         CREATE INDEX IF NOT EXISTS idx_categories_parent ON categories(parent_id);
         CREATE INDEX IF NOT EXISTS idx_categories_sequence ON categories(sequence);
-        CREATE INDEX IF NOT EXISTS idx_categories_language_code ON categories(language_code);
-        CREATE INDEX IF NOT EXISTS idx_categories_english_name ON categories(english_name);
-        CREATE INDEX IF NOT EXISTS idx_item_translations_category ON item_translations(category_id);
-        CREATE INDEX IF NOT EXISTS idx_item_translations_sequence ON item_translations(category_id, sequence);
         CREATE INDEX IF NOT EXISTS idx_bookmark_new_item ON legacy_bookmark_map(new_item_id);
         CREATE INDEX IF NOT EXISTS idx_bookmark_new_cat ON legacy_bookmark_map(new_category_id);
     """)
 
+    # Match production languages (IDs 1,2,5,6,7)
     cur.execute("INSERT INTO languages (id, code, name, is_rtl) VALUES (1, 'gu', 'Gujarati', 0)")
     cur.execute("INSERT INTO languages (id, code, name, is_rtl) VALUES (2, 'en', 'English', 0)")
+    cur.execute("INSERT INTO languages (id, code, name, is_rtl) VALUES (5, 'ur', 'Urdu', 1)")
+    cur.execute("INSERT INTO languages (id, code, name, is_rtl) VALUES (6, 'ro', 'Roman Urdu', 0)")
+    cur.execute("INSERT INTO languages (id, code, name, is_rtl) VALUES (7, 'az', 'Azerbaijani', 0)")
 
     conn.commit()
 
