@@ -32,11 +32,24 @@ TURSO_HTTP_URL = "https://duasandaamalapp-alihusains.aws-ap-northeast-1.turso.io
 
 
 def get_token():
-    """Get Turso token from env var or config.js."""
+    """Get Turso token from env var, config.js, or auto-generate via turso CLI."""
     token = os.environ.get("TURSO_TOKEN")
     if token:
         return token
 
+    # Try turso CLI to generate a fresh token
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["turso", "db", "tokens", "create", "duasandaamalapp"],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0 and result.stdout.strip().startswith("eyJ"):
+            return result.stdout.strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+    # Fall back to config.js
     config_path = SCRIPT_DIR.parent / "config.js"
     if config_path.exists():
         content = config_path.read_text()
@@ -44,8 +57,10 @@ def get_token():
         if match:
             return match.group(1)
 
-    print("Error: No TURSO_TOKEN set.")
-    print("Run with: TURSO_TOKEN='eyJ...' python3 generate_language_dbs.py")
+    print("Error: Could not get TURSO_TOKEN.")
+    print("Options:")
+    print("  1. Install turso CLI: brew install turso")
+    print("  2. Set env var: TURSO_TOKEN='eyJ...' python3 generate_language_dbs.py")
     sys.exit(1)
 
 
