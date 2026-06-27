@@ -14,6 +14,9 @@
         .header h1 span { color: #60a5fa; }
         .header-sep { width: 1px; height: 24px; background: #475569; }
         .header-status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #94a3b8; }
+        .header-user { display: flex; align-items: center; gap: 8px; margin-left: auto; font-size: 12px; color: #94a3b8; }
+        .header-user .user-email { color: #e2e8f0; font-weight: 500; }
+        .header-user .user-role { background: #475569; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; text-transform: uppercase; }
         .status-dot { width: 8px; height: 8px; border-radius: 50%; }
         .status-dot.connected { background: #22c55e; }
         .status-dot.disconnected { background: #ef4444; }
@@ -25,7 +28,6 @@
         .controls label { font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
         .controls select, .controls input { font-size: 13px; padding: 5px 10px; border: 1px solid #d1d5db; border-radius: 6px; background: white; color: #1e293b; }
         .controls select:focus, .controls input:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99,102,241,0.15); }
-        .controls input[type="url"], .controls input[type="password"] { width: 260px; font-family: monospace; font-size: 11px; }
         .controls textarea { font-family: monospace; font-size: 11px; padding: 5px 10px; border: 1px solid #d1d5db; border-radius: 6px; resize: none; }
         .btn { padding: 6px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; transition: all 0.15s; display: inline-flex; align-items: center; gap: 5px; }
         .btn-primary { background: #6366f1; color: white; }
@@ -51,16 +53,15 @@
         /* Univer container */
         .univer-container { flex: 1; overflow: hidden; }
 
-        /* Connection panel */
+        /* Connection/login panel */
         .connect-panel { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; padding: 40px; }
         .connect-card { background: white; border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,0.08); padding: 40px; max-width: 480px; width: 100%; }
         .connect-card h2 { font-size: 22px; font-weight: 700; color: #1e293b; margin-bottom: 4px; }
-        .connect-card p { font-size: 13px; color: #64748b; margin-bottom: 24px; }
+        .connect-card .subtitle { font-size: 13px; color: #64748b; margin-bottom: 24px; }
         .form-group { margin-bottom: 16px; }
         .form-group label { display: block; font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 4px; }
-        .form-group input, .form-group textarea { width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; }
-        .form-group textarea { font-family: monospace; font-size: 12px; resize: vertical; }
-        .form-group input:focus, .form-group textarea:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
+        .form-group input { width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; }
+        .form-group input:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
         .form-group small { display: block; margin-top: 4px; font-size: 11px; color: #94a3b8; }
         .connect-card .btn { width: 100%; justify-content: center; padding: 12px; font-size: 15px; font-weight: 600; }
         .error-msg { background: #fef2f2; border: 1px solid #fecaca; color: #dc2626; padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; }
@@ -95,10 +96,15 @@
         <div class="header-sep"></div>
         <div class="header-status" id="connStatus">
             <div class="status-dot disconnected" id="statusDot"></div>
-            <span id="statusText">Not connected</span>
+            <span id="statusText">Connecting...</span>
         </div>
         <div id="pendingChanges" style="display:none">
             <span class="pending-badge" id="pendingCount">0 changes</span>
+        </div>
+        <div class="header-user" id="userBar" style="display:none">
+            <span class="user-email" id="userEmail"></span>
+            <span class="user-role" id="userRole"></span>
+            <button class="btn btn-outline btn-sm" onclick="logout()" title="Sign out">🚪 Sign out</button>
         </div>
     </div>
 
@@ -131,32 +137,31 @@
         </div>
     </div>
 
-    <!-- Connection Panel -->
-    <div id="connectPanel" class="connect-panel">
+    <!-- Login Panel -->
+    <div id="loginPanel" class="connect-panel">
         <div class="connect-card">
-            <h2>Connect to Database</h2>
-            <p>Enter your Turso database credentials. These stay in your browser only.</p>
+            <h2>🧬 DNA Web</h2>
+            <p class="subtitle">Sign in with your team account to access the spreadsheet editor.</p>
 
-            <div id="connectError" class="error-msg" style="display:none"></div>
+            <div id="loginError" class="error-msg" style="display:none"></div>
 
             <div class="form-group">
                 <label>Branch</label>
-                <div class="branch-pills" id="connectBranchPills"></div>
+                <div class="branch-pills" id="loginBranchPills"></div>
             </div>
 
             <div class="form-group">
-                <label>Database URL</label>
-                <input type="url" id="dbUrl" placeholder="libsql://...">
+                <label>Email</label>
+                <input type="email" id="loginEmail" placeholder="name@example.com" autocomplete="email">
             </div>
 
             <div class="form-group">
-                <label>Auth Token (JWT)</label>
-                <textarea id="authToken" rows="3" placeholder="eyJhbGci..."></textarea>
-                <small>Stored only in localStorage</small>
+                <label>Password</label>
+                <input type="password" id="loginPassword" placeholder="••••••••" autocomplete="current-password">
             </div>
 
-            <button class="btn btn-primary" id="connectBtn" onclick="connect()">
-                Connect to Database
+            <button class="btn btn-primary" id="loginBtn" onclick="userLogin()">
+                Sign In
             </button>
         </div>
     </div>
@@ -166,6 +171,9 @@
 
     <!-- Toast -->
     <div class="toast" id="toast"></div>
+
+    <!-- Config (provides window.CONFIG with Turso URLs and tokens) -->
+    <script src="config.js"></script>
 
     <!-- Dependencies -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -178,36 +186,37 @@
     <script type="module">
         import { createClient } from 'https://esm.sh/@libsql/client/web';
 
-        // ===== CONFIG =====
-        const CONFIG = {
-            branches: {
-                production: {
-                    url: 'libsql://duasandaamalapp-alihusains.aws-ap-northeast-1.turso.io',
-                    label: 'Production'
-                },
-                dev: {
-                    url: 'libsql://duasandaamaldev-alihusains.aws-ap-northeast-1.turso.io',
-                    label: 'Dev'
-                }
+        // ===== CONFIG from config.js =====
+        // window.CONFIG provides: { branches: { production: { url, token }, dev: { url, token } }, defaultBranch }
+        // Falls back to hardcoded values if config.js is missing
+        const BRANCHES = window.CONFIG?.branches || {
+            production: {
+                url: 'libsql://duasandaamalapp-alihusains.aws-ap-northeast-1.turso.io',
+                token: ''
             },
-            defaultBranch: 'production',
-            tables: ['languages', 'categories', 'item_translations']
+            dev: {
+                url: 'libsql://duasandaamaldev-alihusains.aws-ap-northeast-1.turso.io',
+                token: ''
+            }
         };
+        const DEFAULT_BRANCH = window.CONFIG?.defaultBranch || 'production';
+        const TABLES_ALLOWLIST = ['languages', 'categories', 'item_translations'];
 
         // ===== STATE =====
         let client = null;
-        let currentBranch = localStorage.getItem('ssBranch') || CONFIG.defaultBranch;
+        let currentBranch = localStorage.getItem('ssBranch') || DEFAULT_BRANCH;
         let currentTable = '';
-        let pendingEdits = {};  // tableName -> { rowIdx: {col: value} }
+        let pendingEdits = {};  // tableName -> { rowId: {col: value} }
         let autoSave = localStorage.getItem('ssAutoSave') === 'true';
         let tableData = { cols: [], rows: [] };
         let univerAPI = null;
         let isLoading = false;
         let autoSaveTimer = null;
         let lastFailedEdits = null;
+        let currentUser = null;
 
         // ===== DOM REFS =====
-        const $connectPanel = document.getElementById('connectPanel');
+        const $loginPanel = document.getElementById('loginPanel');
         const $controlsBar = document.getElementById('controlsBar');
         const $univerContainer = document.getElementById('univerContainer');
         const $tableSelect = document.getElementById('tableSelect');
@@ -217,10 +226,13 @@
         const $saveBtn = document.getElementById('saveBtn');
         const $pendingChanges = document.getElementById('pendingChanges');
         const $pendingCount = document.getElementById('pendingCount');
-        const $connectError = document.getElementById('connectError');
-        const $connectBtn = document.getElementById('connectBtn');
-        const $dbUrl = document.getElementById('dbUrl');
-        const $authToken = document.getElementById('authToken');
+        const $loginError = document.getElementById('loginError');
+        const $loginBtn = document.getElementById('loginBtn');
+        const $loginEmail = document.getElementById('loginEmail');
+        const $loginPassword = document.getElementById('loginPassword');
+        const $userBar = document.getElementById('userBar');
+        const $userEmail = document.getElementById('userEmail');
+        const $userRole = document.getElementById('userRole');
         const $toast = document.getElementById('toast');
 
         // ===== TOAST =====
@@ -233,61 +245,162 @@
         // ===== BRANCH PILLS =====
         function renderBranchPills(containerId) {
             const container = document.getElementById(containerId);
+            if (!container) return;
             container.innerHTML = '';
-            for (const [key, val] of Object.entries(CONFIG.branches)) {
+            for (const [key, val] of Object.entries(BRANCHES)) {
                 const pill = document.createElement('span');
                 pill.className = `branch-pill ${key === 'production' ? 'prod' : 'dev'} ${key === currentBranch ? 'active' : ''}`;
-                pill.textContent = val.label;
-                pill.onclick = () => {
-                    currentBranch = key;
-                    localStorage.setItem('ssBranch', key);
-                    $dbUrl.value = CONFIG.branches[key].url;
-                    renderBranchPills(containerId);
-                    renderBranchPills('branchPills');
-                };
+                pill.textContent = val.label || key;
+                pill.onclick = () => switchBranch(key);
                 container.appendChild(pill);
             }
         }
 
-        // ===== CONNECTION =====
-        window.connect = async function() {
-            $connectError.style.display = 'none';
-            $connectBtn.disabled = true;
-            $connectBtn.textContent = 'Connecting...';
-            setStatus('loading', 'Connecting...');
+        async function switchBranch(branchKey) {
+            if (!BRANCHES[branchKey]) return;
+            currentBranch = branchKey;
+            localStorage.setItem('ssBranch', branchKey);
+            renderBranchPills('loginBranchPills');
+            renderBranchPills('branchPills');
+            // Reconnect if already logged in
+            if (currentUser) {
+                await connectDb();
+            }
+        }
 
+        // ===== PASSWORD HASHING (same as CMS) =====
+        async function hashPassword(password) {
+            const encoder = new TextEncoder();
+            const data = encoder.encode(password);
+            const hashBuffer = await window.crypto.subtle.digest('SHA-256', data);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        // ===== DATABASE CONNECTION =====
+        async function connectDb() {
+            const branchConfig = BRANCHES[currentBranch];
+            if (!branchConfig) {
+                toast('Unknown branch: ' + currentBranch, 'error');
+                return false;
+            }
+
+            setStatus('loading', 'Connecting...');
             try {
                 client = createClient({
-                    url: $dbUrl.value,
-                    authToken: $authToken.value
+                    url: branchConfig.url,
+                    authToken: branchConfig.token
                 });
                 await client.execute('SELECT 1');
-
-                localStorage.setItem('ssDbUrl', $dbUrl.value);
-                localStorage.setItem('ssAuthToken', $authToken.value);
-
                 setStatus('connected', 'Connected');
-                $connectPanel.style.display = 'none';
-                $controlsBar.style.display = 'flex';
-                $univerContainer.style.display = 'block';
-
-                await loadTableList();
-                initUniver();
-                toast('Connected to database!', 'success');
+                return true;
             } catch (err) {
-                $connectError.textContent = 'Connection failed: ' + err.message;
-                $connectError.style.display = 'block';
                 setStatus('disconnected', 'Connection failed');
-            } finally {
-                $connectBtn.disabled = false;
-                $connectBtn.textContent = 'Connect to Database';
+                toast('Database connection failed: ' + err.message, 'error');
+                return false;
             }
-        };
+        }
 
         function setStatus(state, text) {
             $statusDot.className = `status-dot ${state}`;
             $statusText.textContent = text;
         }
+
+        // ===== USER LOGIN (same as CMS) =====
+        window.userLogin = async function() {
+            $loginError.style.display = 'none';
+            const email = $loginEmail.value.trim();
+            const password = $loginPassword.value;
+
+            if (!email || !password) {
+                $loginError.textContent = 'Please enter both email and password.';
+                $loginError.style.display = 'block';
+                return;
+            }
+
+            $loginBtn.disabled = true;
+            $loginBtn.textContent = 'Signing in...';
+            setStatus('loading', 'Signing in...');
+
+            try {
+                // Ensure we're connected to the database
+                if (!client) {
+                    const connected = await connectDb();
+                    if (!connected) {
+                        throw new Error('Could not connect to database');
+                    }
+                }
+
+                // Hash password and query users table (same as CMS)
+                const hashedPassword = await hashPassword(password);
+                const result = await client.execute({
+                    sql: 'SELECT * FROM users WHERE email = ? AND password_hash = ?',
+                    args: [email, hashedPassword]
+                });
+
+                if (result.rows.length > 0) {
+                    const user = result.rows[0];
+                    currentUser = {
+                        id: user.id,
+                        email: String(user.email),
+                        role: String(user.role)
+                    };
+
+                    // Store session (48-hour expiry, same as CMS)
+                    const expiry = Date.now() + (48 * 60 * 60 * 1000);
+                    localStorage.setItem('ssUser', JSON.stringify(currentUser));
+                    localStorage.setItem('ssSessionExpiry', expiry.toString());
+
+                    onLoginSuccess();
+                } else {
+                    $loginError.textContent = 'Invalid email or password.';
+                    $loginError.style.display = 'block';
+                    setStatus('disconnected', 'Login failed');
+                }
+            } catch (err) {
+                $loginError.textContent = 'Login error: ' + err.message;
+                $loginError.style.display = 'block';
+                setStatus('disconnected', 'Login failed');
+            } finally {
+                $loginBtn.disabled = false;
+                $loginBtn.textContent = 'Sign In';
+                $loginPassword.value = '';
+            }
+        };
+
+        function onLoginSuccess() {
+            $loginPanel.style.display = 'none';
+            $controlsBar.style.display = 'flex';
+            $univerContainer.style.display = 'block';
+
+            // Show user info in header
+            $userBar.style.display = 'flex';
+            $userEmail.textContent = currentUser.email;
+            $userRole.textContent = currentUser.role;
+
+            loadTableList();
+            initUniver();
+            toast('Welcome, ' + currentUser.email + '!', 'success');
+        }
+
+        // ===== LOGOUT =====
+        window.logout = function() {
+            currentUser = null;
+            localStorage.removeItem('ssUser');
+            localStorage.removeItem('ssSessionExpiry');
+
+            $loginPanel.style.display = 'flex';
+            $controlsBar.style.display = 'none';
+            $univerContainer.style.display = 'none';
+            $userBar.style.display = 'none';
+            $loginEmail.value = '';
+            $loginPassword.value = '';
+
+            // Disconnect client
+            client = null;
+            univerAPI = null;
+            setStatus('disconnected', 'Signed out');
+        };
 
         // ===== TABLE LIST =====
         async function loadTableList() {
@@ -501,7 +614,7 @@
         }
 
         // ===== SAVE CHANGES =====
-        const SAFE_TABLES = new Set(CONFIG.tables);
+        const SAFE_TABLES = new Set(TABLES_ALLOWLIST);
 
         window.saveChanges = async function() {
             if (!client || isLoading) return;
@@ -643,33 +756,42 @@
             }
         });
 
+        // Allow Enter key to submit login
+        $loginEmail.addEventListener('keydown', (e) => { if (e.key === 'Enter') userLogin(); });
+        $loginPassword.addEventListener('keydown', (e) => { if (e.key === 'Enter') userLogin(); });
+
         // ===== INIT =====
-        renderBranchPills('connectBranchPills');
+        renderBranchPills('loginBranchPills');
         renderBranchPills('branchPills');
-
-        // Restore saved connection
-        const savedUrl = localStorage.getItem('ssDbUrl');
-        const savedToken = localStorage.getItem('ssAuthToken');
-        if (savedUrl && savedToken) {
-            $dbUrl.value = savedUrl;
-            $authToken.value = savedToken;
-
-            // Set branch URL if matching
-            for (const [key, val] of Object.entries(CONFIG.branches)) {
-                if (val.url === savedUrl) currentBranch = key;
-            }
-            renderBranchPills('connectBranchPills');
-            renderBranchPills('branchPills');
-
-            // Auto-connect
-            connect();
-        } else {
-            // Set default URL
-            $dbUrl.value = CONFIG.branches[currentBranch].url;
-        }
 
         // Restore auto-save toggle
         document.getElementById('autoSaveToggle').className = `toggle ${autoSave ? 'active' : ''}`;
+
+        // Check for existing session (48-hour expiry, same as CMS)
+        const savedUser = localStorage.getItem('ssUser');
+        const sessionExpiry = localStorage.getItem('ssSessionExpiry');
+        if (savedUser && sessionExpiry && Date.now() < parseInt(sessionExpiry)) {
+            // Valid session — auto-connect and skip login
+            currentUser = JSON.parse(savedUser);
+            setStatus('loading', 'Restoring session...');
+
+            try {
+                const connected = await connectDb();
+                if (connected) {
+                    onLoginSuccess();
+                } else {
+                    // Connection failed, show login
+                    currentUser = null;
+                    localStorage.removeItem('ssUser');
+                    localStorage.removeItem('ssSessionExpiry');
+                }
+            } catch (e) {
+                currentUser = null;
+                localStorage.removeItem('ssUser');
+                localStorage.removeItem('ssSessionExpiry');
+            }
+        }
+        // Otherwise, login panel stays visible for user to enter credentials
     </script>
 </body>
 </html>
