@@ -182,83 +182,9 @@
     <script src="https://unpkg.com/@univerjs/presets/lib/umd/index.js"></script>
     <script src="https://unpkg.com/@univerjs/preset-sheets-core/lib/umd/index.js"></script>
 
-    <!-- App logic -->
+    <!-- libSQL client (ESM) -->
     <script type="module">
-        // ===== TURSO CLIENT (raw fetch, avoids CORS issues with @libsql/client/web via esm.sh) =====
-        function createTursoClient({ url, authToken }) {
-            // Convert libsql:// to https://
-            const httpsUrl = url.replace('libsql://', 'https://');
-
-            async function execute(stmtOrObj) {
-                let sql, args;
-                if (typeof stmtOrObj === 'string') {
-                    sql = stmtOrObj;
-                    args = [];
-                } else {
-                    sql = stmtOrObj.sql;
-                    args = stmtOrObj.args || [];
-                }
-
-                const response = await fetch(`${httpsUrl}/v2/pipeline`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${authToken}`
-                    },
-                    body: JSON.stringify({
-                        requests: [{
-                            type: 'execute',
-                            stmt: { sql, args: args.map(a => a === null ? null : a) }
-                        }],
-                        baton: null
-                    })
-                });
-
-                if (!response.ok) {
-                    const err = await response.text();
-                    throw new Error(`HTTP ${response.status}: ${err}`);
-                }
-
-                const data = await response.json();
-                const result = data.results?.[0];
-                if (!result || result.type === 'error') {
-                    throw new Error(result?.error?.message || 'Query failed');
-                }
-
-                return {
-                    cols: result.result?.columns || [],
-                    rows: (result.result?.rows || []).map(row =>
-                        row.map(cell => cell?.value ?? cell)
-                    ),
-                    rowsAffected: result.result?.rowsAffected || 0
-                };
-            }
-
-            async function batch(stmts) {
-                const response = await fetch(`${httpsUrl}/v2/pipeline`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${authToken}`
-                    },
-                    body: JSON.stringify({
-                        requests: stmts.map(s => ({
-                            type: 'execute',
-                            stmt: { sql: s.sql, args: (s.args || []).map(a => a === null ? null : a) }
-                        })),
-                        baton: null
-                    })
-                });
-
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                const data = await response.json();
-                const errors = data.results?.filter(r => r.type === 'error');
-                if (errors?.length) throw new Error(errors[0].error?.message || 'Batch failed');
-                return data;
-            }
-
-            return { execute, batch };
-        }
+        import { createClient } from 'https://esm.sh/@libsql/client/web';
 
         // ===== CONFIG from config.js =====
         // window.CONFIG provides: { branches: { production: { url, token }, dev: { url, token } }, defaultBranch }
@@ -361,7 +287,7 @@
 
             setStatus('loading', 'Connecting...');
             try {
-                client = createTursoClient({
+                client = createClient({
                     url: branchConfig.url,
                     authToken: branchConfig.token
                 });
