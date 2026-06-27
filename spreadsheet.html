@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DNA Web — Spreadsheet Editor</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+        /* Header */
+        .header { background: #1e293b; color: white; padding: 10px 20px; display: flex; align-items: center; gap: 16px; flex-shrink: 0; z-index: 100; }
+        .header h1 { font-size: 16px; font-weight: 600; white-space: nowrap; }
+        .header h1 span { color: #60a5fa; }
+        .header-sep { width: 1px; height: 24px; background: #475569; }
+        .header-status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #94a3b8; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; }
+        .status-dot.connected { background: #22c55e; }
+        .status-dot.disconnected { background: #ef4444; }
+        .status-dot.loading { background: #eab308; animation: pulse 1s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+        /* Controls bar */
+        .controls { background: white; border-bottom: 1px solid #e2e8f0; padding: 8px 20px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; flex-wrap: wrap; }
+        .controls label { font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
+        .controls select, .controls input { font-size: 13px; padding: 5px 10px; border: 1px solid #d1d5db; border-radius: 6px; background: white; color: #1e293b; }
+        .controls select:focus, .controls input:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99,102,241,0.15); }
+        .controls input[type="url"], .controls input[type="password"] { width: 260px; font-family: monospace; font-size: 11px; }
+        .controls textarea { font-family: monospace; font-size: 11px; padding: 5px 10px; border: 1px solid #d1d5db; border-radius: 6px; resize: none; }
+        .btn { padding: 6px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; transition: all 0.15s; display: inline-flex; align-items: center; gap: 5px; }
+        .btn-primary { background: #6366f1; color: white; }
+        .btn-primary:hover { background: #4f46e5; }
+        .btn-primary:disabled { background: #a5b4fc; cursor: not-allowed; }
+        .btn-success { background: #22c55e; color: white; }
+        .btn-success:hover { background: #16a34a; }
+        .btn-success:disabled { background: #86efac; cursor: not-allowed; }
+        .btn-danger { background: #ef4444; color: white; }
+        .btn-danger:hover { background: #dc2626; }
+        .btn-outline { background: white; color: #374151; border: 1px solid #d1d5db; }
+        .btn-outline:hover { background: #f9fafb; }
+        .btn-sm { padding: 4px 10px; font-size: 12px; }
+
+        /* Save mode toggle */
+        .save-mode { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+        .toggle { position: relative; width: 36px; height: 20px; background: #d1d5db; border-radius: 10px; cursor: pointer; transition: background 0.2s; }
+        .toggle.active { background: #6366f1; }
+        .toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; background: white; border-radius: 50%; transition: transform 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+        .toggle.active::after { transform: translateX(16px); }
+        .save-mode label { font-size: 12px; color: #64748b; font-weight: 500; text-transform: none; letter-spacing: 0; }
+
+        /* Univer container */
+        .univer-container { flex: 1; overflow: hidden; }
+
+        /* Connection panel */
+        .connect-panel { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; padding: 40px; }
+        .connect-card { background: white; border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,0.08); padding: 40px; max-width: 480px; width: 100%; }
+        .connect-card h2 { font-size: 22px; font-weight: 700; color: #1e293b; margin-bottom: 4px; }
+        .connect-card p { font-size: 13px; color: #64748b; margin-bottom: 24px; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 4px; }
+        .form-group input, .form-group textarea { width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; }
+        .form-group textarea { font-family: monospace; font-size: 12px; resize: vertical; }
+        .form-group input:focus, .form-group textarea:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
+        .form-group small { display: block; margin-top: 4px; font-size: 11px; color: #94a3b8; }
+        .connect-card .btn { width: 100%; justify-content: center; padding: 12px; font-size: 15px; font-weight: 600; }
+        .error-msg { background: #fef2f2; border: 1px solid #fecaca; color: #dc2626; padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; }
+
+        /* Branch selector */
+        .branch-pills { display: flex; gap: 6px; }
+        .branch-pill { padding: 4px 12px; border-radius: 16px; font-size: 12px; font-weight: 600; cursor: pointer; border: 2px solid transparent; transition: all 0.15s; }
+        .branch-pill.prod { background: #fef2f2; color: #dc2626; border-color: #fecaca; }
+        .branch-pill.prod.active { background: #dc2626; color: white; }
+        .branch-pill.dev { background: #fefce8; color: #a16207; border-color: #fde68a; }
+        .branch-pill.dev.active { background: #eab308; color: white; }
+
+        /* Toast */
+        .toast { position: fixed; bottom: 20px; right: 20px; padding: 12px 20px; border-radius: 8px; font-size: 13px; font-weight: 500; color: white; z-index: 9999; transform: translateY(100px); opacity: 0; transition: all 0.3s ease; pointer-events: none; }
+        .toast.show { transform: translateY(0); opacity: 1; }
+        .toast.success { background: #16a34a; }
+        .toast.error { background: #dc2626; }
+        .toast.info { background: #6366f1; }
+
+        /* Pending changes badge */
+        .pending-badge { background: #f59e0b; color: white; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; animation: pulse 1.5s infinite; }
+    </style>
+
+    <!-- Univer CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/@univerjs/preset-sheets-core/lib/index.css" />
+</head>
+<body>
+
+    <!-- Header -->
+    <div class="header">
+        <h1>🧬 <span>DNA Web</span> — Spreadsheet Editor</h1>
+        <div class="header-sep"></div>
+        <div class="header-status" id="connStatus">
+            <div class="status-dot disconnected" id="statusDot"></div>
+            <span id="statusText">Not connected</span>
+        </div>
+        <div id="pendingChanges" style="display:none">
+            <span class="pending-badge" id="pendingCount">0 changes</span>
+        </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls" id="controlsBar" style="display:none">
+        <div>
+            <label>Branch</label>
+            <div class="branch-pills" id="branchPills"></div>
+        </div>
+        <div class="header-sep"></div>
+        <div>
+            <label>Table</label>
+            <select id="tableSelect">
+                <option value="">— select —</option>
+            </select>
+        </div>
+        <div>
+            <label>Filter</label>
+            <select id="filterLang">
+                <option value="">All languages</option>
+            </select>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="reloadTable()" title="Reload data from database">🔄 Reload</button>
+        <button class="btn btn-outline btn-sm" onclick="exportCSV()" title="Export as CSV">📥 CSV</button>
+
+        <div class="save-mode">
+            <div class="toggle" id="autoSaveToggle" onclick="toggleAutoSave()"></div>
+            <label>Auto-save</label>
+            <button class="btn btn-success btn-sm" id="saveBtn" onclick="saveChanges()" disabled>💾 Save to DB</button>
+        </div>
+    </div>
+
+    <!-- Connection Panel -->
+    <div id="connectPanel" class="connect-panel">
+        <div class="connect-card">
+            <h2>Connect to Database</h2>
+            <p>Enter your Turso database credentials. These stay in your browser only.</p>
+
+            <div id="connectError" class="error-msg" style="display:none"></div>
+
+            <div class="form-group">
+                <label>Branch</label>
+                <div class="branch-pills" id="connectBranchPills"></div>
+            </div>
+
+            <div class="form-group">
+                <label>Database URL</label>
+                <input type="url" id="dbUrl" placeholder="libsql://...">
+            </div>
+
+            <div class="form-group">
+                <label>Auth Token (JWT)</label>
+                <textarea id="authToken" rows="3" placeholder="eyJhbGci..."></textarea>
+                <small>Stored only in localStorage</small>
+            </div>
+
+            <button class="btn btn-primary" id="connectBtn" onclick="connect()">
+                Connect to Database
+            </button>
+        </div>
+    </div>
+
+    <!-- Univer Container -->
+    <div class="univer-container" id="univerContainer" style="display:none"></div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+
+    <!-- Dependencies -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/rxjs@7.8.1/dist/bundles/rxjs.umd.min.js"></script>
+    <script src="https://unpkg.com/@univerjs/presets/lib/umd/index.js"></script>
+    <script src="https://unpkg.com/@univerjs/preset-sheets-core/lib/umd/index.js"></script>
+
+    <!-- libSQL client (ESM) -->
+    <script type="module">
+        import { createClient } from 'https://esm.sh/@libsql/client/web';
+
+        // ===== CONFIG =====
+        const CONFIG = {
+            branches: {
+                production: {
+                    url: 'libsql://duasandaamalapp-alihusains.aws-ap-northeast-1.turso.io',
+                    label: 'Production'
+                },
+                dev: {
+                    url: 'libsql://duasandaamaldev-alihusains.aws-ap-northeast-1.turso.io',
+                    label: 'Dev'
+                }
+            },
+            defaultBranch: 'production',
+            tables: ['languages', 'categories', 'item_translations']
+        };
+
+        // ===== STATE =====
+        let client = null;
+        let currentBranch = localStorage.getItem('ssBranch') || CONFIG.defaultBranch;
+        let currentTable = '';
+        let pendingEdits = {};  // tableName -> { rowIdx: {col: value} }
+        let autoSave = localStorage.getItem('ssAutoSave') === 'true';
+        let tableData = { cols: [], rows: [] };
+        let univerAPI = null;
+        let isLoading = false;
+        let autoSaveTimer = null;
+        let lastFailedEdits = null;
+
+        // ===== DOM REFS =====
+        const $connectPanel = document.getElementById('connectPanel');
+        const $controlsBar = document.getElementById('controlsBar');
+        const $univerContainer = document.getElementById('univerContainer');
+        const $tableSelect = document.getElementById('tableSelect');
+        const $filterLang = document.getElementById('filterLang');
+        const $statusDot = document.getElementById('statusDot');
+        const $statusText = document.getElementById('statusText');
+        const $saveBtn = document.getElementById('saveBtn');
+        const $pendingChanges = document.getElementById('pendingChanges');
+        const $pendingCount = document.getElementById('pendingCount');
+        const $connectError = document.getElementById('connectError');
+        const $connectBtn = document.getElementById('connectBtn');
+        const $dbUrl = document.getElementById('dbUrl');
+        const $authToken = document.getElementById('authToken');
+        const $toast = document.getElementById('toast');
+
+        // ===== TOAST =====
+        function toast(msg, type = 'info') {
+            $toast.textContent = msg;
+            $toast.className = `toast ${type} show`;
+            setTimeout(() => $toast.className = 'toast', 3000);
+        }
+
+        // ===== BRANCH PILLS =====
+        function renderBranchPills(containerId) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = '';
+            for (const [key, val] of Object.entries(CONFIG.branches)) {
+                const pill = document.createElement('span');
+                pill.className = `branch-pill ${key === 'production' ? 'prod' : 'dev'} ${key === currentBranch ? 'active' : ''}`;
+                pill.textContent = val.label;
+                pill.onclick = () => {
+                    currentBranch = key;
+                    localStorage.setItem('ssBranch', key);
+                    $dbUrl.value = CONFIG.branches[key].url;
+                    renderBranchPills(containerId);
+                    renderBranchPills('branchPills');
+                };
+                container.appendChild(pill);
+            }
+        }
+
+        // ===== CONNECTION =====
+        window.connect = async function() {
+            $connectError.style.display = 'none';
+            $connectBtn.disabled = true;
+            $connectBtn.textContent = 'Connecting...';
+            setStatus('loading', 'Connecting...');
+
+            try {
+                client = createClient({
+                    url: $dbUrl.value,
+                    authToken: $authToken.value
+                });
+                await client.execute('SELECT 1');
+
+                localStorage.setItem('ssDbUrl', $dbUrl.value);
+                localStorage.setItem('ssAuthToken', $authToken.value);
+
+                setStatus('connected', 'Connected');
+                $connectPanel.style.display = 'none';
+                $controlsBar.style.display = 'flex';
+                $univerContainer.style.display = 'block';
+
+                await loadTableList();
+                initUniver();
+                toast('Connected to database!', 'success');
+            } catch (err) {
+                $connectError.textContent = 'Connection failed: ' + err.message;
+                $connectError.style.display = 'block';
+                setStatus('disconnected', 'Connection failed');
+            } finally {
+                $connectBtn.disabled = false;
+                $connectBtn.textContent = 'Connect to Database';
+            }
+        };
+
+        function setStatus(state, text) {
+            $statusDot.className = `status-dot ${state}`;
+            $statusText.textContent = text;
+        }
+
+        // ===== TABLE LIST =====
+        async function loadTableList() {
+            try {
+                const result = await client.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+                );
+                const tables = result.rows.map(r => r.name);
+                $tableSelect.innerHTML = '<option value="">— select —</option>';
+                for (const t of tables) {
+                    const opt = document.createElement('option');
+                    opt.value = t;
+                    opt.textContent = t;
+                    $tableSelect.appendChild(opt);
+                }
+            } catch (err) {
+                toast('Failed to load tables: ' + err.message, 'error');
+            }
+        }
+
+        // ===== UNIVER INIT =====
+        function initUniver() {
+            if (univerAPI) return;
+
+            const { createUniver } = UniverPresets;
+            const { LocaleType, mergeLocales } = UniverCore;
+            const { UniverSheetsCorePreset, UniverSheetsCorePresetEnUS } = UniverPresetSheetsCore;
+
+            univerAPI = createUniver({
+                container: $univerContainer,
+                locale: LocaleType.EN_US,
+                locales: {
+                    [LocaleType.EN_US]: mergeLocales(UniverSheetsCorePresetEnUS),
+                },
+                presets: [UniverSheetsCorePreset()],
+            });
+
+            // Listen for cell edits
+            univerAPI.addEvent(univerAPI.Event.SheetEditEnded, (params) => {
+                if (!currentTable || !tableData.cols.length) return;
+                const { row, column } = params;
+                if (row < 0 || column < 0) return;
+
+                try {
+                    const fWorkbook = univerAPI.getActiveWorkbook();
+                    const fWorksheet = fWorkbook.getActiveSheet();
+                    const newVal = fWorksheet.getRange(row, column).getValue();
+
+                    // row 0 = header, data starts at row 1
+                    const dataRowIdx = row - 1;
+                    if (dataRowIdx < 0 || dataRowIdx >= tableData.rows.length) return;
+
+                    const colName = tableData.cols[column];
+                    if (!colName || colName === '__rowid__') return;
+
+                    const rowId = tableData.rows[dataRowIdx].__rowid__;
+                    if (rowId === undefined) return;
+
+                    if (!pendingEdits[currentTable]) pendingEdits[currentTable] = {};
+                    if (!pendingEdits[currentTable][rowId]) pendingEdits[currentTable][rowId] = {};
+
+                    const oldVal = tableData.rows[dataRowIdx][colName];
+                    if (String(newVal) === String(oldVal ?? '')) {
+                        delete pendingEdits[currentTable][rowId][colName];
+                        if (Object.keys(pendingEdits[currentTable][rowId]).length === 0) {
+                            delete pendingEdits[currentTable][rowId];
+                        }
+                    } else {
+                        pendingEdits[currentTable][rowId][colName] = newVal;
+                    }
+
+                    updatePendingUI();
+
+                    if (autoSave) {
+                        clearTimeout(autoSaveTimer);
+                        autoSaveTimer = setTimeout(() => saveChanges(), 800);
+                    }
+                } catch (e) {
+                    console.error('Edit tracking error:', e);
+                }
+            });
+
+            univerAPI.createWorkbook({ name: 'DNA Web Spreadsheet' });
+        }
+
+        function updatePendingUI() {
+            let total = 0;
+            for (const table of Object.keys(pendingEdits)) {
+                total += Object.keys(pendingEdits[table]).length;
+            }
+            if (total > 0) {
+                $pendingChanges.style.display = 'inline';
+                $pendingCount.textContent = `${total} change${total > 1 ? 's' : ''}`;
+                $saveBtn.disabled = false;
+            } else {
+                $pendingChanges.style.display = 'none';
+                $saveBtn.disabled = true;
+            }
+        }
+
+        // ===== LOAD TABLE DATA =====
+        async function loadTable(tableName, langFilter = '') {
+            if (!client || !tableName) return;
+            setStatus('loading', 'Loading ' + tableName + '...');
+            isLoading = true;
+
+            try {
+                let sql = `SELECT * FROM ${tableName}`;
+                const args = [];
+
+                // Add language filter for item_translations
+                if (tableName === 'item_translations' && langFilter) {
+                    sql += ` WHERE category_id IN (SELECT id FROM categories WHERE language_code = ?)`;
+                    args.push(langFilter);
+                }
+
+                sql += ` ORDER BY id LIMIT 5000`;
+
+                const result = await client.execute({ sql, args });
+
+                if (result.rows.length >= 5000) {
+                    toast('Warning: Results capped at 5,000 rows. Some data may not be shown.', 'info');
+                }
+
+                const cols = result.cols.map(c => c.name || c);
+                const rows = result.rows.map(row => {
+                    const obj = {};
+                    cols.forEach((col, i) => {
+                        obj[col] = row[i] ?? '';
+                    });
+                    return obj;
+                });
+
+                tableData = { cols, rows };
+                renderTableInUniver();
+                setStatus('connected', `${tableName}: ${rows.length} rows`);
+
+                // Load language filter options
+                if (tableName === 'item_translations') {
+                    await loadLanguageFilter();
+                } else {
+                    $filterLang.innerHTML = '<option value="">All languages</option>';
+                }
+            } catch (err) {
+                toast('Failed to load table: ' + err.message, 'error');
+                setStatus('connected', 'Error loading data');
+            } finally {
+                isLoading = false;
+            }
+        }
+
+        async function loadLanguageFilter() {
+            try {
+                const result = await client.execute('SELECT code, name FROM languages ORDER BY id');
+                $filterLang.innerHTML = '<option value="">All languages</option>';
+                for (const lang of result.rows) {
+                    const opt = document.createElement('option');
+                    opt.value = lang.code;
+                    opt.textContent = `${lang.name} (${lang.code})`;
+                    $filterLang.appendChild(opt);
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        function renderTableInUniver() {
+            if (!univerAPI || !tableData.cols.length) return;
+
+            try {
+                const fWorkbook = univerAPI.getActiveWorkbook();
+                const fWorksheet = fWorkbook.getActiveSheet();
+
+                // Clear existing data by setting all to empty
+                const maxRows = Math.max(tableData.rows.length + 1, 100);
+                const maxCols = tableData.cols.length;
+                const clearRange = fWorksheet.getRange(0, 0, maxRows, maxCols);
+                clearRange.setValues(
+                    Array.from({ length: maxRows }, () => Array(maxCols).fill(''))
+                );
+
+                // Set headers
+                const headerRow = [tableData.cols];
+                fWorksheet.getRange(0, 0, 1, tableData.cols.length).setValues(headerRow);
+
+                // Set data
+                if (tableData.rows.length > 0) {
+                    const dataValues = tableData.rows.map(row =>
+                        tableData.cols.map(col => {
+                            const v = row[col];
+                            return v === null || v === undefined ? '' : String(v);
+                        })
+                    );
+                    fWorksheet.getRange(1, 0, dataValues.length, tableData.cols.length).setValues(dataValues);
+                }
+
+                // Auto-fit column widths (basic heuristic)
+                for (let c = 0; c < tableData.cols.length; c++) {
+                    const headerLen = tableData.cols[c].length;
+                    let maxLen = headerLen;
+                    for (let r = 0; r < Math.min(tableData.rows.length, 20); r++) {
+                        const val = String(tableData.rows[r][tableData.cols[c]] ?? '');
+                        maxLen = Math.max(maxLen, Math.min(val.length, 60));
+                    }
+                    const width = Math.max(80, Math.min(maxLen * 8 + 20, 400));
+                    fWorksheet.setColumnWidth(c, width);
+                }
+
+            } catch (e) {
+                console.error('Render error:', e);
+                toast('Error rendering data: ' + e.message, 'error');
+            }
+        }
+
+        // ===== SAVE CHANGES =====
+        const SAFE_TABLES = new Set(CONFIG.tables);
+
+        window.saveChanges = async function() {
+            if (!client || isLoading) return;
+
+            // On failure, restore edits so user doesn't lose work
+            if (lastFailedEdits) {
+                for (const [t, rows] of Object.entries(lastFailedEdits)) {
+                    if (!pendingEdits[t]) pendingEdits[t] = {};
+                    Object.assign(pendingEdits[t], rows);
+                }
+                lastFailedEdits = null;
+            }
+
+            const allEdits = JSON.parse(JSON.stringify(pendingEdits));
+            let totalChanges = 0;
+            for (const table of Object.keys(allEdits)) {
+                totalChanges += Object.keys(allEdits[table]).length;
+            }
+            if (totalChanges === 0) return;
+
+            // Validate table names against allowlist
+            for (const tableName of Object.keys(allEdits)) {
+                if (!SAFE_TABLES.has(tableName)) {
+                    toast(`Rejected edits to unknown table: ${tableName}`, 'error');
+                    return;
+                }
+            }
+
+            setStatus('loading', `Saving ${totalChanges} changes...`);
+            $saveBtn.disabled = true;
+            isLoading = true;
+
+            try {
+                let savedCount = 0;
+
+                for (const [tableName, rowEdits] of Object.entries(allEdits)) {
+                    for (const [rowId, colEdits] of Object.entries(rowEdits)) {
+                        const setClauses = [];
+                        const args = [];
+
+                        for (const [col, val] of Object.entries(colEdits)) {
+                            setClauses.push(`${col} = ?`);
+                            args.push(val === '' ? null : val);
+                        }
+                        args.push(rowId);
+
+                        const sql = `UPDATE ${tableName} SET ${setClauses.join(', ')} WHERE id = ?`;
+                        await client.execute({ sql, args });
+                        savedCount++;
+
+                        // Remove from pending only after successful write
+                        if (pendingEdits[tableName]) {
+                            delete pendingEdits[tableName][rowId];
+                            if (Object.keys(pendingEdits[tableName]).length === 0) {
+                                delete pendingEdits[tableName];
+                            }
+                        }
+                    }
+                }
+
+                updatePendingUI();
+                toast(`Saved ${savedCount} row(s) successfully!`, 'success');
+                setStatus('connected', `Saved ${savedCount} changes`);
+
+            } catch (err) {
+                // Preserve edits on failure so user can retry
+                lastFailedEdits = allEdits;
+                toast('Save failed: ' + err.message + ' — changes preserved, click Save to retry.', 'error');
+                setStatus('connected', 'Save failed');
+                $saveBtn.disabled = false;
+            } finally {
+                isLoading = false;
+            }
+        };
+
+        // ===== AUTO-SAVE TOGGLE =====
+        window.toggleAutoSave = function() {
+            autoSave = !autoSave;
+            localStorage.setItem('ssAutoSave', autoSave);
+            document.getElementById('autoSaveToggle').className = `toggle ${autoSave ? 'active' : ''}`;
+        };
+
+        // ===== RELOAD =====
+        window.reloadTable = function() {
+            if (currentTable) {
+                const langFilter = $filterLang.value;
+                pendingEdits[currentTable] = {};
+                updatePendingUI();
+                loadTable(currentTable, langFilter);
+                toast('Data reloaded', 'info');
+            }
+        };
+
+        // ===== EXPORT CSV =====
+        window.exportCSV = function() {
+            if (!tableData.cols.length || !tableData.rows.length) {
+                toast('No data to export', 'error');
+                return;
+            }
+
+            const escapeCSV = (val) => {
+                const s = String(val ?? '');
+                if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+                    return '"' + s.replace(/"/g, '""') + '"';
+                }
+                return s;
+            };
+
+            const lines = [tableData.cols.join(',')];
+            for (const row of tableData.rows) {
+                lines.push(tableData.cols.map(col => escapeCSV(row[col])).join(','));
+            }
+
+            const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${currentTable}_export.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+            toast('CSV exported!', 'success');
+        };
+
+        // ===== EVENT HANDLERS =====
+        $tableSelect.addEventListener('change', (e) => {
+            currentTable = e.target.value;
+            if (currentTable) {
+                pendingEdits[currentTable] = {};
+                updatePendingUI();
+                loadTable(currentTable, $filterLang.value);
+            }
+        });
+
+        $filterLang.addEventListener('change', () => {
+            if (currentTable === 'item_translations') {
+                pendingEdits[currentTable] = {};
+                updatePendingUI();
+                loadTable(currentTable, $filterLang.value);
+            }
+        });
+
+        // ===== INIT =====
+        renderBranchPills('connectBranchPills');
+        renderBranchPills('branchPills');
+
+        // Restore saved connection
+        const savedUrl = localStorage.getItem('ssDbUrl');
+        const savedToken = localStorage.getItem('ssAuthToken');
+        if (savedUrl && savedToken) {
+            $dbUrl.value = savedUrl;
+            $authToken.value = savedToken;
+
+            // Set branch URL if matching
+            for (const [key, val] of Object.entries(CONFIG.branches)) {
+                if (val.url === savedUrl) currentBranch = key;
+            }
+            renderBranchPills('connectBranchPills');
+            renderBranchPills('branchPills');
+
+            // Auto-connect
+            connect();
+        } else {
+            // Set default URL
+            $dbUrl.value = CONFIG.branches[currentBranch].url;
+        }
+
+        // Restore auto-save toggle
+        document.getElementById('autoSaveToggle').className = `toggle ${autoSave ? 'active' : ''}`;
+    </script>
+</body>
+</html>
