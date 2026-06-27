@@ -1,0 +1,7 @@
+name = "turso-proxy"
+main = "index.js"
+compatibility_date = "2024-01-01"
+
+[routes]
+pattern = "turso-proxy.alihusains.workers.dev/*"
+zone_name = "alihusains.workers.dev"

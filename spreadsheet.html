@@ -128,6 +128,12 @@
             </select>
         </div>
         <button class="btn btn-outline btn-sm" onclick="reloadTable()" title="Reload data from database">🔄 Reload</button>
+        <span class="header-sep"></span>
+        <button class="btn btn-outline btn-sm" onclick="insertRow(true)" title="Insert row above selection">⬆️ Above</button>
+        <button class="btn btn-outline btn-sm" onclick="insertRow(false)" title="Insert row below selection">⬇️ Below</button>
+        <button class="btn btn-outline btn-sm" onclick="duplicateRow()" title="Duplicate selected row">📋 Duplicate</button>
+        <button class="btn btn-outline btn-sm" onclick="deleteRow()" title="Delete selected row">🗑️ Delete</button>
+        <span class="header-sep"></span>
         <button class="btn btn-outline btn-sm" onclick="exportCSV()" title="Export as CSV">📥 CSV</button>
 
         <div class="save-mode">
@@ -189,7 +195,17 @@
         // ===== CONFIG from config.js =====
         // window.CONFIG provides: { branches: { production: { url, token }, dev: { url, token } }, defaultBranch }
         // Falls back to hardcoded values if config.js is missing
-        const BRANCHES = window.CONFIG?.branches || {
+        function proxyUrl(libsqlUrl) {
+            // On localhost, route through *.localhost:8080 to bypass CORS
+            // *.localhost resolves to 127.0.0.1; our server reads the Host header
+            // to determine the real Turso host and proxies with CORS headers.
+            if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+                const hostname = libsqlUrl.replace(/^libsql:\/\//, '');
+                return `http://${hostname}.localhost:8080`;
+            }
+            return libsqlUrl;
+        }
+        const RAW_BRANCHES = window.CONFIG?.branches || {
             production: {
                 url: 'libsql://duasandaamalapp-alihusains.aws-ap-northeast-1.turso.io',
                 token: ''
@@ -199,6 +215,12 @@
                 token: ''
             }
         };
+        const BRANCHES = Object.fromEntries(
+            Object.entries(RAW_BRANCHES).map(([key, val]) => [
+                key,
+                { ...val, url: proxyUrl(val.url) }
+            ])
+        );
         const DEFAULT_BRANCH = window.CONFIG?.defaultBranch || 'production';
         const TABLES_ALLOWLIST = ['languages', 'categories', 'item_translations'];
 
@@ -213,7 +235,11 @@
         let isLoading = false;
         let autoSaveTimer = null;
         let lastFailedEdits = null;
+        let lastFailedDeletes = null;
+        let lastFailedInserts = null;
         let currentUser = null;
+        let pendingNewRows = {};   // tableName -> [{rowId: -ts, col: val, ...}]
+        let pendingDeleteIds = {}; // tableName -> Set<number>
 
         // ===== DOM REFS =====
         const $loginPanel = document.getElementById('loginPanel');
@@ -262,7 +288,8 @@
             localStorage.setItem('ssBranch', branchKey);
             renderBranchPills('loginBranchPills');
             renderBranchPills('branchPills');
-            // Reconnect if already logged in
+            client = null;
+            setStatus('disconnected', 'Disconnected');
             if (currentUser) {
                 await connectDb();
             }
@@ -323,12 +350,9 @@
             setStatus('loading', 'Signing in...');
 
             try {
-                // Ensure we're connected to the database
-                if (!client) {
-                    const connected = await connectDb();
-                    if (!connected) {
-                        throw new Error('Could not connect to database');
-                    }
+                const connected = await connectDb();
+                if (!connected) {
+                    throw new Error('Could not connect to database');
                 }
 
                 // Hash password and query users table (same as CMS)
@@ -352,7 +376,11 @@
                     localStorage.setItem('ssSessionExpiry', expiry.toString());
 
                     $loginError.style.display = 'none';
-                    onLoginSuccess();
+                    try {
+                        onLoginSuccess();
+                    } catch (uiErr) {
+                        console.error('Post-login UI error:', uiErr);
+                    }
                 } else {
                     $loginError.textContent = 'Invalid email or password.';
                     $loginError.style.display = 'block';
@@ -423,99 +451,98 @@
         }
 
         // ===== UNIVER INIT =====
-        // Helper to get the Facade API (FUniver) from the Univer instance
         let univerInstance = null;
         let univerReady = false;
 
-        function getFUniver() {
-            if (!univerInstance) return null;
-            // Try to get the FUniver facade from the injector
-            try {
-                const { FUniver } = UniverCore;
-                if (FUniver && univerInstance.__getInjector) {
-                    return univerInstance.__getInjector().get(FUniver);
-                }
-            } catch (e) { /* ignore */ }
-            // Fallback: the instance might IS be the facade
-            return univerInstance;
-        }
-
         function initUniver() {
             if (univerInstance) return;
-
-            const { createUniver } = UniverPresets;
-            const { LocaleType, mergeLocales } = UniverCore;
-            const { UniverSheetsCorePreset, UniverSheetsCorePresetEnUS } = UniverPresetSheetsCore;
-
-            univerInstance = createUniver({
-                container: $univerContainer,
-                locale: LocaleType.EN_US,
-                locales: {
-                    [LocaleType.EN_US]: mergeLocales(UniverSheetsCorePresetEnUS),
-                },
-                presets: [UniverSheetsCorePreset()],
-            });
-
-            // The createUniver from presets returns a FUniver directly
-            univerAPI = univerInstance;
-
-            // Listen for cell edits
             try {
-                univerAPI.addEvent(univerAPI.Event.SheetEditEnded, (params) => {
-                    if (!currentTable || !tableData.cols.length) return;
-                    const { row, column } = params;
-                    if (row < 0 || column < 0) return;
+                const { createUniver } = UniverPresets;
+                const { LocaleType, mergeLocales } = UniverCore;
+                const { UniverSheetsCorePreset, UniverSheetsCorePresetEnUS } = UniverPresetSheetsCore;
 
-                    try {
-                        const fWorkbook = univerAPI.getActiveWorkbook();
-                        const fWorksheet = fWorkbook.getActiveSheet();
-                        const newVal = fWorksheet.getRange(row, column).getValue();
-
-                        // row 0 = header, data starts at row 1
-                        const dataRowIdx = row - 1;
-                        if (dataRowIdx < 0 || dataRowIdx >= tableData.rows.length) return;
-
-                        const colName = tableData.cols[column];
-                        if (!colName || colName === 'id') return;
-
-                        const rowId = tableData.rows[dataRowIdx].id;
-                        if (rowId === undefined) return;
-
-                        if (!pendingEdits[currentTable]) pendingEdits[currentTable] = {};
-                        if (!pendingEdits[currentTable][rowId]) pendingEdits[currentTable][rowId] = {};
-
-                        const oldVal = tableData.rows[dataRowIdx][colName];
-                        if (String(newVal) === String(oldVal ?? '')) {
-                            delete pendingEdits[currentTable][rowId][colName];
-                            if (Object.keys(pendingEdits[currentTable][rowId]).length === 0) {
-                                delete pendingEdits[currentTable][rowId];
-                            }
-                        } else {
-                            pendingEdits[currentTable][rowId][colName] = newVal;
-                        }
-
-                        updatePendingUI();
-
-                        if (autoSave) {
-                            clearTimeout(autoSaveTimer);
-                            autoSaveTimer = setTimeout(() => saveChanges(), 800);
-                        }
-                    } catch (e) {
-                        console.error('Edit tracking error:', e);
-                    }
+                univerInstance = createUniver({
+                    locale: LocaleType.EN_US,
+                    locales: {
+                        [LocaleType.EN_US]: mergeLocales(UniverSheetsCorePresetEnUS),
+                    },
+                    presets: [UniverSheetsCorePreset({
+                        container: 'univerContainer',
+                        maxRows: 20000,
+                        maxColumns: 200,
+                        toolbar: false,
+                        footer: false,
+                        menu: false,
+                        contextMenu: false,
+                    })],
                 });
-            } catch (e) {
-                console.error('Failed to add edit event listener:', e);
-            }
 
-            univerAPI.createWorkbook({ name: 'DNA Web Spreadsheet' });
-            univerReady = true;
+                univerAPI = univerInstance.univerAPI;
+
+                if (univerAPI?.addEvent && univerAPI?.Event?.SheetEditEnded) {
+                    univerAPI.addEvent(univerAPI.Event.SheetEditEnded, (params) => {
+                        if (!currentTable || !tableData.cols.length) return;
+                        const { row, column } = params;
+                        if (row < 0 || column < 0) return;
+
+                        try {
+                            const fWorkbook = univerAPI.getActiveWorkbook();
+                            const fWorksheet = fWorkbook.getActiveSheet();
+                            const newVal = fWorksheet.getRange(row, column).getValue();
+
+                            const dataRowIdx = row - 1;
+                            if (dataRowIdx < 0 || dataRowIdx >= tableData.rows.length) return;
+
+                            const colName = tableData.cols[column];
+                            if (!colName || colName === 'id') return;
+
+                            const rowId = tableData.rows[dataRowIdx].id;
+                            if (rowId === undefined) return;
+
+                            if (!pendingEdits[currentTable]) pendingEdits[currentTable] = {};
+                            if (!pendingEdits[currentTable][rowId]) pendingEdits[currentTable][rowId] = {};
+
+                            const oldVal = tableData.rows[dataRowIdx][colName];
+                            if (String(newVal) === String(oldVal ?? '')) {
+                                delete pendingEdits[currentTable][rowId][colName];
+                                if (Object.keys(pendingEdits[currentTable][rowId]).length === 0) {
+                                    delete pendingEdits[currentTable][rowId];
+                                }
+                            } else {
+                                pendingEdits[currentTable][rowId][colName] = newVal;
+                            }
+
+                            updatePendingUI();
+
+                            if (autoSave) {
+                                clearTimeout(autoSaveTimer);
+                                autoSaveTimer = setTimeout(() => saveChanges(), 800);
+                            }
+                        } catch (e) {
+                            console.error('Edit tracking error:', e);
+                        }
+                    });
+                }
+
+                if (typeof univerAPI?.createWorkbook === 'function') {
+                    univerAPI.createWorkbook({ name: 'DNA Web Spreadsheet' });
+                }
+                univerReady = true;
+            } catch (e) {
+                console.error('Failed to initialize Univer:', e);
+            }
         }
 
         function updatePendingUI() {
             let total = 0;
             for (const table of Object.keys(pendingEdits)) {
                 total += Object.keys(pendingEdits[table]).length;
+            }
+            for (const table of Object.keys(pendingNewRows)) {
+                total += pendingNewRows[table].length;
+            }
+            for (const table of Object.keys(pendingDeleteIds)) {
+                total += pendingDeleteIds[table].size;
             }
             if (total > 0) {
                 $pendingChanges.style.display = 'inline';
@@ -598,12 +625,19 @@
                 const fWorkbook = univerAPI.getActiveWorkbook();
                 const fWorksheet = fWorkbook.getActiveSheet();
 
-                // Clear existing data by setting all to empty
-                const maxRows = Math.max(tableData.rows.length + 1, 100);
-                const maxCols = tableData.cols.length;
-                const clearRange = fWorksheet.getRange(0, 0, maxRows, maxCols);
+                const neededRows = tableData.rows.length + 1;
+                const neededCols = tableData.cols.length;
+
+                // Expand sheet if needed
+                const maxRows = fWorksheet.getMaxRows();
+                const maxCols = fWorksheet.getMaxColumns();
+                if (neededRows > maxRows) fWorksheet.setRowCount(neededRows);
+                if (neededCols > maxCols) fWorksheet.setColumnCount(neededCols);
+
+                // Clear existing data
+                const clearRange = fWorksheet.getRange(0, 0, neededRows, neededCols);
                 clearRange.setValues(
-                    Array.from({ length: maxRows }, () => Array(maxCols).fill(''))
+                    Array.from({ length: neededRows }, () => Array(neededCols).fill(''))
                 );
 
                 // Set headers
@@ -645,60 +679,103 @@
         window.saveChanges = async function() {
             if (!client || isLoading) return;
 
-            // On failure, restore edits so user doesn't lose work
+            // On failure, restore all pending state
             if (lastFailedEdits) {
                 for (const [t, rows] of Object.entries(lastFailedEdits)) {
                     if (!pendingEdits[t]) pendingEdits[t] = {};
                     Object.assign(pendingEdits[t], rows);
                 }
+                if (lastFailedDeletes) {
+                    for (const [t, ids] of Object.entries(lastFailedDeletes)) {
+                        if (!pendingDeleteIds[t]) pendingDeleteIds[t] = new Set();
+                        for (const id of ids) pendingDeleteIds[t].add(id);
+                    }
+                }
+                if (lastFailedInserts) {
+                    for (const [t, ids] of Object.entries(lastFailedInserts)) {
+                        if (!pendingNewRows[t]) pendingNewRows[t] = [];
+                        pendingNewRows[t].push(...ids);
+                    }
+                }
                 lastFailedEdits = null;
+                lastFailedDeletes = null;
+                lastFailedInserts = null;
             }
 
             const allEdits = JSON.parse(JSON.stringify(pendingEdits));
-            let totalChanges = 0;
-            for (const table of Object.keys(allEdits)) {
-                totalChanges += Object.keys(allEdits[table]).length;
+            const allDeletes = {};
+            for (const [t, ids] of Object.entries(pendingDeleteIds)) {
+                allDeletes[t] = [...ids];
             }
-            if (totalChanges === 0) return;
+            const allInserts = JSON.parse(JSON.stringify(pendingNewRows));
 
-            // Validate table names against allowlist
-            for (const tableName of Object.keys(allEdits)) {
-                if (!SAFE_TABLES.has(tableName)) {
-                    toast(`Rejected edits to unknown table: ${tableName}`, 'error');
+            let totalOps = 0;
+            for (const t of Object.keys(allEdits)) totalOps += Object.keys(allEdits[t]).length;
+            for (const t of Object.keys(allDeletes)) totalOps += allDeletes[t].length;
+            for (const t of Object.keys(allInserts)) totalOps += allInserts[t].length;
+            if (totalOps === 0) return;
+
+            const tables = new Set([...Object.keys(allEdits), ...Object.keys(allDeletes), ...Object.keys(allInserts)]);
+            for (const t of tables) {
+                if (!SAFE_TABLES.has(t)) {
+                    toast(`Rejected edits to unknown table: ${t}`, 'error');
                     return;
                 }
             }
 
-            setStatus('loading', `Saving ${totalChanges} changes...`);
+            setStatus('loading', `Saving ${totalOps} changes...`);
             $saveBtn.disabled = true;
             isLoading = true;
 
             try {
                 let savedCount = 0;
 
+                // 1. Deletes
+                for (const [tableName, ids] of Object.entries(allDeletes)) {
+                    if (!ids.length) continue;
+                    const placeholders = ids.map(() => '?').join(',');
+                    await client.execute({ sql: `DELETE FROM ${tableName} WHERE id IN (${placeholders})`, args: ids });
+                    savedCount += ids.length;
+                    delete pendingDeleteIds[tableName];
+                }
+
+                // 2. Updates
                 for (const [tableName, rowEdits] of Object.entries(allEdits)) {
                     for (const [rowId, colEdits] of Object.entries(rowEdits)) {
                         const setClauses = [];
                         const args = [];
-
                         for (const [col, val] of Object.entries(colEdits)) {
                             setClauses.push(`${col} = ?`);
-                            args.push(val === '' ? null : val);
+                            args.push(val === '' ? '' : val);
                         }
                         args.push(rowId);
-
                         const sql = `UPDATE ${tableName} SET ${setClauses.join(', ')} WHERE id = ?`;
                         await client.execute({ sql, args });
                         savedCount++;
-
-                        // Remove from pending only after successful write
                         if (pendingEdits[tableName]) {
                             delete pendingEdits[tableName][rowId];
-                            if (Object.keys(pendingEdits[tableName]).length === 0) {
-                                delete pendingEdits[tableName];
-                            }
+                            if (Object.keys(pendingEdits[tableName]).length === 0) delete pendingEdits[tableName];
                         }
                     }
+                }
+
+                // 3. Inserts
+                for (const [tableName, tempIds] of Object.entries(allInserts)) {
+                    for (const tempId of tempIds) {
+                        const row = tableData.rows.find(r => r.id === tempId);
+                        if (!row) continue;
+                        const cols = tableData.cols.filter(c => c !== 'id');
+                        const placeholders = cols.map(() => '?').join(',');
+                        const values = cols.map(c => row[c] ?? '');
+                        const result = await client.execute({
+                            sql: `INSERT INTO ${tableName} (${cols.join(', ')}) VALUES (${placeholders})`,
+                            args: values
+                        });
+                        const newId = Number(result.lastInsertRowid);
+                        row.id = newId;
+                        savedCount++;
+                    }
+                    delete pendingNewRows[tableName];
                 }
 
                 updatePendingUI();
@@ -706,8 +783,9 @@
                 setStatus('connected', `Saved ${savedCount} changes`);
 
             } catch (err) {
-                // Preserve edits on failure so user can retry
                 lastFailedEdits = allEdits;
+                lastFailedDeletes = allDeletes;
+                lastFailedInserts = allInserts;
                 toast('Save failed: ' + err.message + ' — changes preserved, click Save to retry.', 'error');
                 setStatus('connected', 'Save failed');
                 $saveBtn.disabled = false;
@@ -728,6 +806,8 @@
             if (currentTable) {
                 const langFilter = $filterLang.value;
                 pendingEdits[currentTable] = {};
+                pendingNewRows[currentTable] = [];
+                pendingDeleteIds[currentTable] = new Set();
                 updatePendingUI();
                 loadTable(currentTable, langFilter);
                 toast('Data reloaded', 'info');
@@ -764,11 +844,121 @@
             toast('CSV exported!', 'success');
         };
 
+        // ===== ROW OPERATIONS =====
+        function getActiveDataRow() {
+            if (!univerAPI || !currentTable || !tableData.cols.length) return -1;
+            try {
+                const fWorkbook = univerAPI.getActiveWorkbook();
+                const fWorksheet = fWorkbook.getActiveSheet();
+                const range = fWorksheet.getActiveRange();
+                return range.row - 1;
+            } catch (e) { return -1; }
+        }
+
+        window.insertRow = function(above) {
+            if (!currentTable || !tableData.cols.length) {
+                toast('No table loaded', 'error');
+                return;
+            }
+
+            const raw = getActiveDataRow();
+            let idx = Number.isFinite(raw) ? raw : -1;
+            let atIdx;
+            if (idx < 0) {
+                atIdx = 0;
+            } else {
+                atIdx = above ? Math.max(0, idx) : Math.min(tableData.rows.length, idx + 1);
+            }
+
+            const tempId = -Date.now();
+            const newRow = { id: tempId };
+            for (const col of tableData.cols) {
+                if (col !== 'id') newRow[col] = '';
+            }
+
+            if (!pendingNewRows[currentTable]) pendingNewRows[currentTable] = [];
+            pendingNewRows[currentTable].push(tempId);
+
+            tableData.rows.splice(atIdx, 0, newRow);
+            renderTableInUniver();
+            updatePendingUI();
+            toast(`Row inserted ${above ? 'above' : 'below'}`, 'success');
+        };
+
+        window.deleteRow = function() {
+            if (!currentTable || !tableData.rows.length) {
+                toast('No data to delete', 'error');
+                return;
+            }
+            const idx = getActiveDataRow();
+            if (!Number.isFinite(idx) || idx < 0 || idx >= tableData.rows.length) {
+                toast('Select a row to delete', 'error');
+                return;
+            }
+
+            const row = tableData.rows[idx];
+            if (!row) {
+                toast('Row not found', 'error');
+                return;
+            }
+            const rowId = row.id;
+
+            // If from DB, mark for deletion
+            if (rowId > 0) {
+                if (!pendingDeleteIds[currentTable]) pendingDeleteIds[currentTable] = new Set();
+                pendingDeleteIds[currentTable].add(rowId);
+            }
+
+            // Remove from pending inserts
+            if (pendingNewRows[currentTable]) {
+                pendingNewRows[currentTable] = pendingNewRows[currentTable].filter(id => id !== rowId);
+            }
+
+            // Clear pending edits for this row
+            if (pendingEdits[currentTable]?.[rowId]) {
+                delete pendingEdits[currentTable][rowId];
+                if (Object.keys(pendingEdits[currentTable]).length === 0) {
+                    delete pendingEdits[currentTable];
+                }
+            }
+
+            tableData.rows.splice(idx, 1);
+            renderTableInUniver();
+            updatePendingUI();
+            toast('Row deleted', 'info');
+        };
+
+        window.duplicateRow = function() {
+            if (!currentTable || !tableData.rows.length) {
+                toast('No data to duplicate', 'error');
+                return;
+            }
+            const idx = getActiveDataRow();
+            if (!Number.isFinite(idx) || idx < 0 || idx >= tableData.rows.length) {
+                toast('Select a row to duplicate', 'error');
+                return;
+            }
+
+            const source = tableData.rows[idx];
+            const tempId = -Date.now();
+            const newRow = { ...source, id: tempId };
+
+            if (!pendingNewRows[currentTable]) pendingNewRows[currentTable] = [];
+            pendingNewRows[currentTable].push(tempId);
+
+            tableData.rows.splice(idx + 1, 0, newRow);
+            renderTableInUniver();
+            updatePendingUI();
+            toast('Row duplicated', 'success');
+        };
+
         // ===== EVENT HANDLERS =====
         $tableSelect.addEventListener('change', (e) => {
             currentTable = e.target.value;
             if (currentTable) {
                 pendingEdits[currentTable] = {};
+                pendingNewRows[currentTable] = [];
+                pendingDeleteIds[currentTable] = new Set();
                 updatePendingUI();
                 loadTable(currentTable, $filterLang.value);
             }
@@ -777,6 +967,8 @@
         $filterLang.addEventListener('change', () => {
             if (currentTable === 'item_translations') {
                 pendingEdits[currentTable] = {};
+                pendingNewRows[currentTable] = [];
+                pendingDeleteIds[currentTable] = new Set();
                 updatePendingUI();
                 loadTable(currentTable, $filterLang.value);
             }
