@@ -423,14 +423,31 @@
         }
 
         // ===== UNIVER INIT =====
+        // Helper to get the Facade API (FUniver) from the Univer instance
+        let univerInstance = null;
+        let univerReady = false;
+
+        function getFUniver() {
+            if (!univerInstance) return null;
+            // Try to get the FUniver facade from the injector
+            try {
+                const { FUniver } = UniverCore;
+                if (FUniver && univerInstance.__getInjector) {
+                    return univerInstance.__getInjector().get(FUniver);
+                }
+            } catch (e) { /* ignore */ }
+            // Fallback: the instance might IS be the facade
+            return univerInstance;
+        }
+
         function initUniver() {
-            if (univerAPI) return;
+            if (univerInstance) return;
 
             const { createUniver } = UniverPresets;
             const { LocaleType, mergeLocales } = UniverCore;
             const { UniverSheetsCorePreset, UniverSheetsCorePresetEnUS } = UniverPresetSheetsCore;
 
-            univerAPI = createUniver({
+            univerInstance = createUniver({
                 container: $univerContainer,
                 locale: LocaleType.EN_US,
                 locales: {
@@ -439,52 +456,60 @@
                 presets: [UniverSheetsCorePreset()],
             });
 
+            // The createUniver from presets returns a FUniver directly
+            univerAPI = univerInstance;
+
             // Listen for cell edits
-            univerAPI.addEvent(univerAPI.Event.SheetEditEnded, (params) => {
-                if (!currentTable || !tableData.cols.length) return;
-                const { row, column } = params;
-                if (row < 0 || column < 0) return;
+            try {
+                univerAPI.addEvent(univerAPI.Event.SheetEditEnded, (params) => {
+                    if (!currentTable || !tableData.cols.length) return;
+                    const { row, column } = params;
+                    if (row < 0 || column < 0) return;
 
-                try {
-                    const fWorkbook = univerAPI.getActiveWorkbook();
-                    const fWorksheet = fWorkbook.getActiveSheet();
-                    const newVal = fWorksheet.getRange(row, column).getValue();
+                    try {
+                        const fWorkbook = univerAPI.getActiveWorkbook();
+                        const fWorksheet = fWorkbook.getActiveSheet();
+                        const newVal = fWorksheet.getRange(row, column).getValue();
 
-                    // row 0 = header, data starts at row 1
-                    const dataRowIdx = row - 1;
-                    if (dataRowIdx < 0 || dataRowIdx >= tableData.rows.length) return;
+                        // row 0 = header, data starts at row 1
+                        const dataRowIdx = row - 1;
+                        if (dataRowIdx < 0 || dataRowIdx >= tableData.rows.length) return;
 
-                    const colName = tableData.cols[column];
-                    if (!colName || colName === 'id') return;
+                        const colName = tableData.cols[column];
+                        if (!colName || colName === 'id') return;
 
-                    const rowId = tableData.rows[dataRowIdx].id;
-                    if (rowId === undefined) return;
+                        const rowId = tableData.rows[dataRowIdx].id;
+                        if (rowId === undefined) return;
 
-                    if (!pendingEdits[currentTable]) pendingEdits[currentTable] = {};
-                    if (!pendingEdits[currentTable][rowId]) pendingEdits[currentTable][rowId] = {};
+                        if (!pendingEdits[currentTable]) pendingEdits[currentTable] = {};
+                        if (!pendingEdits[currentTable][rowId]) pendingEdits[currentTable][rowId] = {};
 
-                    const oldVal = tableData.rows[dataRowIdx][colName];
-                    if (String(newVal) === String(oldVal ?? '')) {
-                        delete pendingEdits[currentTable][rowId][colName];
-                        if (Object.keys(pendingEdits[currentTable][rowId]).length === 0) {
-                            delete pendingEdits[currentTable][rowId];
+                        const oldVal = tableData.rows[dataRowIdx][colName];
+                        if (String(newVal) === String(oldVal ?? '')) {
+                            delete pendingEdits[currentTable][rowId][colName];
+                            if (Object.keys(pendingEdits[currentTable][rowId]).length === 0) {
+                                delete pendingEdits[currentTable][rowId];
+                            }
+                        } else {
+                            pendingEdits[currentTable][rowId][colName] = newVal;
                         }
-                    } else {
-                        pendingEdits[currentTable][rowId][colName] = newVal;
-                    }
 
-                    updatePendingUI();
+                        updatePendingUI();
 
-                    if (autoSave) {
-                        clearTimeout(autoSaveTimer);
-                        autoSaveTimer = setTimeout(() => saveChanges(), 800);
+                        if (autoSave) {
+                            clearTimeout(autoSaveTimer);
+                            autoSaveTimer = setTimeout(() => saveChanges(), 800);
+                        }
+                    } catch (e) {
+                        console.error('Edit tracking error:', e);
                     }
-                } catch (e) {
-                    console.error('Edit tracking error:', e);
-                }
-            });
+                });
+            } catch (e) {
+                console.error('Failed to add edit event listener:', e);
+            }
 
             univerAPI.createWorkbook({ name: 'DNA Web Spreadsheet' });
+            univerReady = true;
         }
 
         function updatePendingUI() {
