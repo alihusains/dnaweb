@@ -351,6 +351,7 @@
                     localStorage.setItem('ssUser', JSON.stringify(currentUser));
                     localStorage.setItem('ssSessionExpiry', expiry.toString());
 
+                    $loginError.style.display = 'none';
                     onLoginSuccess();
                 } else {
                     $loginError.textContent = 'Invalid email or password.';
@@ -525,7 +526,7 @@
                     toast('Warning: Results capped at 5,000 rows. Some data may not be shown.', 'info');
                 }
 
-                const cols = result.cols.map(c => c.name || c);
+                const cols = result.columns.map(c => c.name || c);
                 const rows = result.rows.map(row => {
                     const obj = {};
                     cols.forEach((col, i) => {
