@@ -455,9 +455,9 @@
                     if (dataRowIdx < 0 || dataRowIdx >= tableData.rows.length) return;
 
                     const colName = tableData.cols[column];
-                    if (!colName || colName === '__rowid__') return;
+                    if (!colName || colName === 'id') return;
 
-                    const rowId = tableData.rows[dataRowIdx].__rowid__;
+                    const rowId = tableData.rows[dataRowIdx].id;
                     if (rowId === undefined) return;
 
                     if (!pendingEdits[currentTable]) pendingEdits[currentTable] = {};
