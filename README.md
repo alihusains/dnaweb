@@ -9,8 +9,6 @@
 ![Last Commit](https://img.shields.io/github/last-commit/alihusains/dnaweb)
 ![License](https://img.shields.io/github/license/alihusains/dnaweb)
 ![Repo Size](https://img.shields.io/github/repo-size/alihusains/dnaweb)
+![Version](https://img.shields.io/github/v/tag/alihusains/dnaweb)
 
 ----
-
-Overview
-This repository contains the source code and configuration for the dnaweb project. The badges above provide a quick overview of the current build, release, and deployment status, as well as key repository metrics.
