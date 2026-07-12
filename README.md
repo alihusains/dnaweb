@@ -1,6 +1,4 @@
 <!-- GitHub Actions – Workflows -->
-![CI](https://github.com/alihusains/dnaweb/actions/workflows/ci.yml/badge.svg)
-![Release](https://github.com/alihusains/dnaweb/actions/workflows/release.yml/badge.svg)
 ![Deploy](https://github.com/alihusains/dnaweb/actions/workflows/deploy.yml/badge.svg)
 
 <!-- Repository status -->
