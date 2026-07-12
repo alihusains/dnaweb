@@ -323,7 +323,6 @@ jobs:
             ## Production Release v${{ env.DB_VERSION }}
 
             **Branch:** ${{ env.DB_BRANCH }}
-            **Password:** `Mimalif@110`
 
             ### Files included:
             - `database.sqlite` — Full database (all languages)
@@ -331,7 +330,12 @@ jobs:
 
             ### How to use:
             1. Download the appropriate `.sqlite` file
-            2. Open with any SQLite tool using password: `Mimalif@110`
+            2. Open with any SQLite tool using the configured password
             3. For mobile apps, use SQLCipher with the same password
           files: |
             release_files/*
+
+      - name: Update latest tag
+        run: |
+          git tag -f latest
+          git push -f origin latest

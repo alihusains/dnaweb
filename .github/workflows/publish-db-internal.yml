@@ -323,7 +323,6 @@ jobs:
             ## Internal Pre-release v${{ env.DB_VERSION }}
 
             **Branch:** ${{ env.DB_BRANCH }}
-            **Password:** `Mimalif@110`
 
             ### Files included:
             - `database.sqlite` — Full database (all languages)
@@ -332,3 +331,8 @@ jobs:
             > This is an internal pre-release for testing. Do not distribute to end users.
           files: |
             release_files/*
+
+      - name: Update latest-internal tag
+        run: |
+          git tag -f latest-internal
+          git push -f origin latest-internal
