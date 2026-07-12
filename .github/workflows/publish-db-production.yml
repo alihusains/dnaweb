@@ -232,7 +232,7 @@ jobs:
           cp release_files/*.sqlite releases/
           
           # Update version.json
-          echo "{\"version\": \"${DB_VERSION}\", \"channel\": \"production\"}" > version.json
+          echo "{\"version\": \"${DB_VERSION}\"}" > version.json
           
           # Commit
           git config user.name "github-actions[bot]"
