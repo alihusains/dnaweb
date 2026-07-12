@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version (leave empty to auto-increment from version.json)'
+        description: 'Version (leave empty to auto-increment)'
         required: false
         default: ''
       branch:
@@ -20,45 +20,40 @@ permissions:
   contents: write
 
 jobs:
-  publish-production:
+  publish:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Setup Node.js + cache
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
 
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y sqlcipher
-          npm install @libsql/client better-sqlite3
+          sudo apt-get update && sudo apt-get install -y sqlcipher
+          npm ci || npm install
 
       - name: Determine version
         id: version
         run: |
-          INPUT_VERSION="${{ github.event.inputs.version }}"
-
-          if [ -n "$INPUT_VERSION" ]; then
-            VERSION="$INPUT_VERSION"
-            echo "Using manual version: $VERSION"
+          INPUT="${{ github.event.inputs.version }}"
+          if [ -n "$INPUT" ]; then
+            VERSION="$INPUT"
           else
             CURRENT=$(cat version.json 2>/dev/null | grep -o '"version": "[^"]*"' | cut -d'"' -f4 || echo "2.57")
             MAJOR=$(echo $CURRENT | cut -d. -f1)
             MINOR=$(echo $CURRENT | cut -d. -f2)
-            if [ -z "$MINOR" ] || [ "$MINOR" = "" ]; then MINOR=57; fi
-            MINOR=$((MINOR + 1))
-            VERSION="${MAJOR}.${MINOR}"
-            echo "Auto-incremented from $CURRENT to $VERSION"
+            [ -z "$MINOR" ] && MINOR=57
+            VERSION="${MAJOR}.$((MINOR + 1))"
           fi
-          
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          echo "version=$VERSION"
+          echo "Version: $VERSION"
 
-      - name: Set database credentials
+      - name: Set credentials
         run: |
           BRANCH="${{ github.event.inputs.branch || 'production' }}"
           if [ "$BRANCH" = "dev" ]; then
@@ -72,187 +67,28 @@ jobs:
           echo "DB_VERSION=${{ steps.version.outputs.VERSION }}" >> $GITHUB_ENV
           echo "DB_PASSWORD=Mimalif@110" >> $GITHUB_ENV
 
-      - name: Generate all database files
-        run: |
-          cat << 'SCRIPT' > generate-dbs.mjs
-          import { createClient } from '@libsql/client';
-          import Database from 'better-sqlite3';
-          import { execSync } from 'child_process';
-          import fs from 'fs';
-
-          const VERSION = process.env.DB_VERSION;
-          const BRANCH = process.env.DB_BRANCH;
-          const PASSWORD = process.env.DB_PASSWORD;
-          const OUTPUT_DIR = 'release_files';
-
-          if (fs.existsSync(OUTPUT_DIR)) fs.rmSync(OUTPUT_DIR, { recursive: true });
-          fs.mkdirSync(OUTPUT_DIR, { recursive: true });
-
-          async function main() {
-            const turso = createClient({
-              url: process.env.TURSO_URL,
-              authToken: process.env.TURSO_TOKEN
-            });
-
-            console.log(`Generating production release v${VERSION} from ${BRANCH} branch`);
-
-            console.log('\n--- Fetching data from Turso ---');
-            const tables = ['languages', 'categories', 'item_translations'];
-            const data = {};
-            for (const table of tables) {
-              const result = await turso.execute(`SELECT * FROM ${table}`);
-              data[table] = result.rows;
-              console.log(`  ${table}: ${result.rows.length} rows`);
-            }
-            try {
-              const bmResult = await turso.execute('SELECT * FROM legacy_bookmark_map');
-              data['legacy_bookmark_map'] = bmResult.rows;
-              console.log(`  legacy_bookmark_map: ${bmResult.rows.length} rows`);
-            } catch (e) {
-              console.log('  legacy_bookmark_map: not found, skipping');
-            }
-
-            console.log('\n--- Generating full database ---');
-            const fullDbPath = `${OUTPUT_DIR}/database.sqlite`;
-            createFullDb(fullDbPath, data);
-            encryptAndVerify(fullDbPath, PASSWORD);
-            console.log(`  database.sqlite: ${(fs.statSync(fullDbPath).size / 1024).toFixed(1)} KB`);
-
-            const languages = data.languages;
-            console.log(`\n--- Generating per-language databases (${languages.length} languages) ---`);
-            for (const lang of languages) {
-              const langFile = `${OUTPUT_DIR}/database_${lang.code}.sqlite`;
-              console.log(`\n  Generating database_${lang.code}.sqlite (${lang.name})...`);
-              createLanguageDb(langFile, lang.code, data);
-              encryptAndVerify(langFile, PASSWORD);
-              console.log(`  database_${lang.code}.sqlite: ${(fs.statSync(langFile).size / 1024).toFixed(1)} KB`);
-            }
-
-            console.log('\n--- All files generated ---');
-            for (const f of fs.readdirSync(OUTPUT_DIR)) {
-              console.log(`  ${f} (${(fs.statSync(`${OUTPUT_DIR}/${f}`).size / 1024).toFixed(1)} KB)`);
-            }
-          }
-
-          function createFullDb(outputPath, data) {
-            const db = new Database(outputPath);
-            db.pragma('journal_mode = WAL');
-            db.exec(`
-              CREATE TABLE IF NOT EXISTS languages (id INTEGER PRIMARY KEY, code TEXT NOT NULL, name TEXT NOT NULL, is_rtl INTEGER DEFAULT 0);
-              CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY, parent_id INTEGER, sequence INTEGER DEFAULT 0, lang_name TEXT, english_name TEXT, audio_url TEXT, video_url TEXT, duas_url TEXT, local_audio_url TEXT, local_video_url TEXT, is_trans INTEGER DEFAULT 0, related1 INTEGER, related2 INTEGER, notify_hijri_date TEXT, label1 TEXT, label2 TEXT, is_last_level INTEGER DEFAULT 0, language_code TEXT DEFAULT 'gu', content_source_id INTEGER);
-              CREATE TABLE IF NOT EXISTS item_translations (id INTEGER PRIMARY KEY, category_id INTEGER NOT NULL, sequence INTEGER DEFAULT 0, language_title TEXT, arabic TEXT, translation TEXT, transliteration TEXT, is_visible INTEGER DEFAULT 1, english TEXT);
-              CREATE INDEX IF NOT EXISTS idx_categories_english_name ON categories(english_name);
-              CREATE INDEX IF NOT EXISTS idx_categories_parent ON categories(parent_id);
-              CREATE INDEX IF NOT EXISTS idx_categories_sequence ON categories(sequence);
-              CREATE INDEX IF NOT EXISTS idx_categories_language_code ON categories(language_code);
-              CREATE INDEX IF NOT EXISTS idx_item_translations_category ON item_translations(category_id);
-            `);
-            insertTable(db, 'languages', data.languages);
-            insertTable(db, 'categories', data.categories);
-            insertTable(db, 'item_translations', data.item_translations);
-            if (data.legacy_bookmark_map) {
-              db.exec(`CREATE TABLE IF NOT EXISTS legacy_bookmark_map (source_table TEXT NOT NULL, legacy_id INTEGER NOT NULL, new_category_id INTEGER, new_item_id INTEGER, legacy_title TEXT, PRIMARY KEY (source_table, legacy_id));`);
-              insertTable(db, 'legacy_bookmark_map', data.legacy_bookmark_map);
-            }
-            db.close();
-          }
-
-          function createLanguageDb(outputPath, langCode, data) {
-            const db = new Database(outputPath);
-            db.pragma('journal_mode = WAL');
-            db.exec(`
-              CREATE TABLE IF NOT EXISTS languages (id INTEGER PRIMARY KEY, code TEXT NOT NULL, name TEXT NOT NULL, is_rtl INTEGER DEFAULT 0);
-              CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY, parent_id INTEGER, sequence INTEGER DEFAULT 0, lang_name TEXT, english_name TEXT, audio_url TEXT, video_url TEXT, duas_url TEXT, local_audio_url TEXT, local_video_url TEXT, is_trans INTEGER DEFAULT 0, related1 INTEGER, related2 INTEGER, notify_hijri_date TEXT, label1 TEXT, label2 TEXT, is_last_level INTEGER DEFAULT 0, language_code TEXT DEFAULT 'gu', content_source_id INTEGER);
-              CREATE TABLE IF NOT EXISTS item_translations (id INTEGER PRIMARY KEY, category_id INTEGER NOT NULL, sequence INTEGER DEFAULT 0, language_title TEXT, arabic TEXT, translation TEXT, transliteration TEXT, is_visible INTEGER DEFAULT 1, english TEXT);
-              CREATE INDEX IF NOT EXISTS idx_categories_english_name ON categories(english_name);
-              CREATE INDEX IF NOT EXISTS idx_categories_parent ON categories(parent_id);
-              CREATE INDEX IF NOT EXISTS idx_categories_sequence ON categories(sequence);
-              CREATE INDEX IF NOT EXISTS idx_categories_language_code ON categories(language_code);
-              CREATE INDEX IF NOT EXISTS idx_item_translations_category ON item_translations(category_id);
-            `);
-            const lang = data.languages.find(l => l.code === langCode);
-            if (lang) {
-              db.prepare('INSERT INTO languages (id, code, name, is_rtl) VALUES (?, ?, ?, ?)').run(lang.id, lang.code, lang.name, lang.is_rtl);
-            }
-            const langCatIds = new Set(data.categories.filter(c => c.language_code === langCode).map(c => c.id));
-            if (langCatIds.size === 0) { db.close(); fs.unlinkSync(outputPath); return; }
-            const catMap = new Map(data.categories.map(c => [c.id, c]));
-            const allNeededIds = new Set(langCatIds);
-            for (const catId of langCatIds) {
-              let current = catId;
-              while (current) {
-                const cat = catMap.get(current);
-                if (cat && cat.parent_id && !allNeededIds.has(cat.parent_id)) { allNeededIds.add(cat.parent_id); current = cat.parent_id; }
-                else { break; }
-              }
-            }
-            const categories = data.categories.filter(c => allNeededIds.has(c.id));
-            for (const cat of categories) {
-              db.prepare('INSERT INTO categories (id, parent_id, sequence, lang_name, english_name, audio_url, video_url, duas_url, local_audio_url, local_video_url, is_trans, related1, related2, notify_hijri_date, label1, label2, is_last_level, language_code, content_source_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(cat.id, cat.parent_id, cat.sequence, cat.lang_name, cat.english_name, cat.audio_url, cat.video_url, cat.duas_url, cat.local_audio_url, cat.local_video_url, cat.is_trans, cat.related1, cat.related2, cat.notify_hijri_date, cat.label1, cat.label2, cat.is_last_level, cat.language_code, cat.content_source_id);
-            }
-            const items = data.item_translations.filter(i => allNeededIds.has(i.category_id));
-            for (const item of items) {
-              db.prepare('INSERT INTO item_translations (id, category_id, sequence, language_title, arabic, translation, transliteration, is_visible, english) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(item.id, item.category_id, item.sequence, item.language_title, item.arabic, item.translation, item.transliteration, item.is_visible, item.english);
-            }
-            console.log(`    ${categories.length} categories, ${items.length} items`);
-            db.close();
-          }
-
-          function insertTable(db, tableName, rows) {
-            if (!rows || rows.length === 0) return;
-            const columns = Object.keys(rows[0]);
-            const placeholders = columns.map(() => '?').join(',');
-            const stmt = db.prepare(`INSERT INTO ${tableName} (${columns.join(',')}) VALUES (${placeholders})`);
-            const insertMany = db.transaction((items) => { for (const row of items) { stmt.run(columns.map(col => row[col] ?? null)); } });
-            insertMany(rows);
-          }
-
-          function encryptAndVerify(filePath, password) {
-            const tempFile = `${filePath}.tmp`;
-            fs.renameSync(filePath, tempFile);
-            execSync(`sqlcipher ${tempFile} "ATTACH DATABASE '${filePath}' AS encrypted KEY '${password}'; SELECT sqlcipher_export('encrypted'); DETACH DATABASE encrypted;"`);
-            fs.unlinkSync(tempFile);
-            try { execSync(`sqlcipher ${filePath} "PRAGMA key = '${password}'; SELECT count(*) FROM sqlite_master;"`, { stdio: 'pipe' }); }
-            catch (e) { throw new Error(`Encryption verification failed: ${e.message}`); }
-          }
-
-          main().catch(err => { console.error('Error:', err.message); process.exit(1); });
-          SCRIPT
-
-      - name: Run database generation
+      - name: Generate databases
         run: node generate-dbs.mjs
 
-      - name: Commit files to releases folder
+      - name: Commit to releases/
         run: |
-          # Clear old release files
           rm -f releases/*.sqlite
-          
-          # Copy new files
           cp release_files/*.sqlite releases/
-          
-          # Update version.json
           echo "{\"version\": \"${DB_VERSION}\"}" > version.json
-          
-          # Commit
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add releases/ version.json
-          git commit -m "chore(release): update to v${DB_VERSION} [bot]" || echo "No changes to commit"
+          git diff --cached --quiet || git commit -m "chore(release): v${DB_VERSION} [bot]"
           git push
 
-      - name: Create Production Release
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.DB_VERSION }}
           name: "Release v${{ env.DB_VERSION }}"
           prerelease: false
           body: |
-            ## Release v${{ env.DB_VERSION }}
-
             **Branch:** ${{ env.DB_BRANCH }}
 
-            ### Files
-            - `database.sqlite` — Full database (all languages)
-            - `database_{lang}.sqlite` — Per-language databases
-          files: |
-            release_files/*
+            Files: `database.sqlite` + `database_{lang}.sqlite`
+          files: release_files/*
