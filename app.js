@@ -70,6 +70,9 @@ const app = createApp({
         const mediaTestUrl = ref('');
         const mediaTestType = ref('');
         const showExportModal = ref(false);
+        const exportSelectedLanguages = ref([]);
+        const exportProgress = reactive({ running: false, message: '', percent: 0, files: [] });
+        let sqlWasm = null;
 
         const draggedIndex = ref(null);
         const dropTargetIndex = ref(null);
@@ -763,6 +766,315 @@ const app = createApp({
             mediaTestType.value = type;
         };
 
+        // --- Export Functions ---
+        const initSqlWasm = async () => {
+            if (!sqlWasm) {
+                if (typeof initSqlJs === 'undefined') {
+                    throw new Error('sql.js library not loaded. Check your internet connection.');
+                }
+                sqlWasm = await initSqlJs({ locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${file}` });
+            }
+            return sqlWasm;
+        };
+
+        const SCHEMA_SQL = `
+            CREATE TABLE IF NOT EXISTS languages (
+                id INTEGER PRIMARY KEY,
+                code TEXT NOT NULL,
+                name TEXT NOT NULL,
+                is_rtl INTEGER DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS categories (
+                id INTEGER PRIMARY KEY,
+                parent_id INTEGER,
+                sequence INTEGER DEFAULT 0,
+                lang_name TEXT,
+                english_name TEXT,
+                audio_url TEXT,
+                video_url TEXT,
+                duas_url TEXT,
+                local_audio_url TEXT,
+                local_video_url TEXT,
+                is_trans INTEGER DEFAULT 0,
+                related1 INTEGER,
+                related2 INTEGER,
+                notify_hijri_date TEXT,
+                label1 TEXT,
+                label2 TEXT,
+                is_last_level INTEGER DEFAULT 0,
+                language_code TEXT DEFAULT 'gu',
+                content_source_id INTEGER DEFAULT NULL
+            );
+            CREATE TABLE IF NOT EXISTS item_translations (
+                id INTEGER PRIMARY KEY,
+                category_id INTEGER NOT NULL,
+                sequence INTEGER DEFAULT 0,
+                language_title TEXT,
+                arabic TEXT,
+                translation TEXT,
+                transliteration TEXT,
+                is_visible INTEGER DEFAULT 1,
+                english TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_categories_english_name ON categories(english_name);
+            CREATE INDEX IF NOT EXISTS idx_categories_parent ON categories(parent_id);
+            CREATE INDEX IF NOT EXISTS idx_categories_sequence ON categories(sequence);
+            CREATE INDEX IF NOT EXISTS idx_categories_language_code ON categories(language_code);
+            CREATE INDEX IF NOT EXISTS idx_item_translations_category ON item_translations(category_id);
+        `;
+
+        const FULL_SCHEMA_SQL = SCHEMA_SQL + `
+            CREATE TABLE IF NOT EXISTS legacy_bookmark_map (
+                source_table TEXT NOT NULL,
+                legacy_id INTEGER NOT NULL,
+                new_category_id INTEGER,
+                new_item_id INTEGER,
+                legacy_title TEXT,
+                PRIMARY KEY (source_table, legacy_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_bookmark_new_item ON legacy_bookmark_map(new_item_id);
+            CREATE INDEX IF NOT EXISTS idx_bookmark_new_cat ON legacy_bookmark_map(new_category_id);
+        `;
+
+        // Fetch all data for a specific language from Turso
+        const fetchLanguageData = async (langCode) => {
+            const langResult = await libsqlClient.execute({
+                sql: 'SELECT * FROM languages WHERE code = ?',
+                args: [langCode]
+            });
+            const langRows = langResult.rows;
+
+            // Fetch ALL categories once (much faster than N+1 parent lookups)
+            const allCatsResult = await libsqlClient.execute('SELECT * FROM categories ORDER BY id');
+            const allCats = allCatsResult.rows;
+            const catMap = new Map(allCats.map(c => [c.id, c]));
+
+            // Get category IDs for this language
+            const langCatIds = allCats.filter(c => c.language_code === langCode).map(c => c.id);
+
+            if (langCatIds.length === 0) {
+                return { language: langRows[0], categories: [], items: [] };
+            }
+
+            // Walk up parent chain in-memory (no network calls)
+            const allNeededIds = new Set(langCatIds);
+            for (const catId of langCatIds) {
+                let current = catId;
+                while (current) {
+                    const cat = catMap.get(current);
+                    if (cat && cat.parent_id && !allNeededIds.has(cat.parent_id)) {
+                        allNeededIds.add(cat.parent_id);
+                        current = cat.parent_id;
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            const categories = allCats.filter(c => allNeededIds.has(c.id));
+
+            const itemResult = await libsqlClient.execute({
+                sql: `SELECT * FROM item_translations WHERE category_id IN (${[...allNeededIds].join(',')}) ORDER BY id`,
+                args: []
+            });
+
+            return {
+                language: langRows[0],
+                categories,
+                items: itemResult.rows
+            };
+        };
+
+        // Fetch all data (for full DB export)
+        const fetchAllData = async () => {
+            const langResult = await libsqlClient.execute('SELECT * FROM languages ORDER BY id');
+            const catResult = await libsqlClient.execute('SELECT * FROM categories ORDER BY id');
+            const itemResult = await libsqlClient.execute('SELECT * FROM item_translations ORDER BY id');
+
+            return {
+                languages: langResult.rows,
+                categories: catResult.rows,
+                items: itemResult.rows
+            };
+        };
+
+        // Insert rows into sql.js database
+        const insertRows = (db, tableName, columns, rows) => {
+            if (rows.length === 0) return;
+            const placeholders = columns.map(() => '?').join(',');
+            const stmt = db.prepare(`INSERT INTO ${tableName} (${columns.join(',')}) VALUES (${placeholders})`);
+            for (const row of rows) {
+                stmt.run(columns.map(col => row[col] ?? null));
+            }
+            stmt.free();
+        };
+
+        // Download a Uint8Array as a file
+        const downloadFile = (data, filename) => {
+            const blob = new Blob([data], { type: 'application/octet-stream' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        };
+
+        const formatBytes = (bytes) => {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        };
+
+        // Export a single language database
+        const exportSingleLanguageDb = async (langCode, langName) => {
+            const SQL = await initSqlWasm();
+            const db = new SQL.Database();
+            db.exec(SCHEMA_SQL);
+
+            const data = await fetchLanguageData(langCode);
+
+            if (data.language) {
+                insertRows(db, 'languages', ['id', 'code', 'name', 'is_rtl'], [data.language]);
+            }
+            insertRows(db, 'categories', [
+                'id', 'parent_id', 'sequence', 'lang_name', 'english_name',
+                'audio_url', 'video_url', 'duas_url', 'local_audio_url', 'local_video_url',
+                'is_trans', 'related1', 'related2', 'notify_hijri_date', 'label1', 'label2',
+                'is_last_level', 'language_code', 'content_source_id'
+            ], data.categories);
+            insertRows(db, 'item_translations', [
+                'id', 'category_id', 'sequence', 'language_title',
+                'arabic', 'translation', 'transliteration', 'is_visible', 'english'
+            ], data.items);
+
+            const raw = db.export();
+            db.close();
+
+            const filename = `database_${langCode}.sqlite`;
+            downloadFile(raw, filename);
+
+            return { name: filename, size: formatBytes(raw.byteLength) };
+        };
+
+        // Toggle all languages selection
+        const toggleAllLanguages = () => {
+            if (exportSelectedLanguages.value.length === languages.value.length) {
+                exportSelectedLanguages.value = [];
+            } else {
+                exportSelectedLanguages.value = languages.value.map(l => l.code);
+            }
+        };
+
+        // Export selected language databases
+        const exportSelectedLanguageDbs = async () => {
+            if (exportSelectedLanguages.value.length === 0) return;
+            exportProgress.running = true;
+            exportProgress.files = [];
+            exportProgress.percent = 0;
+
+            try {
+                for (let i = 0; i < exportSelectedLanguages.value.length; i++) {
+                    const code = exportSelectedLanguages.value[i];
+                    const lang = languages.value.find(l => l.code === code);
+                    const name = lang ? lang.name : code;
+                    exportProgress.message = `Exporting ${name} (${code})...`;
+                    exportProgress.percent = Math.round(((i) / exportSelectedLanguages.value.length) * 100);
+
+                    const result = await exportSingleLanguageDb(code, name);
+                    exportProgress.files.push(result);
+                }
+                exportProgress.percent = 100;
+                exportProgress.message = `Exported ${exportProgress.files.length} file(s) successfully!`;
+            } catch (err) {
+                exportProgress.message = `Error: ${err.message}`;
+            } finally {
+                exportProgress.running = false;
+            }
+        };
+
+        // Export full database (all languages, no users)
+        const exportFullDb = async () => {
+            exportProgress.running = true;
+            exportProgress.files = [];
+            exportProgress.percent = 0;
+            exportProgress.message = 'Fetching all data...';
+
+            try {
+                const SQL = await initSqlWasm();
+                const db = new SQL.Database();
+                db.exec(FULL_SCHEMA_SQL);
+
+                exportProgress.percent = 10;
+                exportProgress.message = 'Fetching languages...';
+                const data = await fetchAllData();
+
+                exportProgress.percent = 30;
+                exportProgress.message = 'Inserting languages...';
+                insertRows(db, 'languages', ['id', 'code', 'name', 'is_rtl'], data.languages);
+
+                exportProgress.percent = 50;
+                exportProgress.message = 'Inserting categories...';
+                insertRows(db, 'categories', [
+                    'id', 'parent_id', 'sequence', 'lang_name', 'english_name',
+                    'audio_url', 'video_url', 'duas_url', 'local_audio_url', 'local_video_url',
+                    'is_trans', 'related1', 'related2', 'notify_hijri_date', 'label1', 'label2',
+                    'is_last_level', 'language_code', 'content_source_id'
+                ], data.categories);
+
+                exportProgress.percent = 75;
+                exportProgress.message = 'Inserting translations...';
+                insertRows(db, 'item_translations', [
+                    'id', 'category_id', 'sequence', 'language_title',
+                    'arabic', 'translation', 'transliteration', 'is_visible', 'english'
+                ], data.items);
+
+                exportProgress.percent = 90;
+                exportProgress.message = 'Generating file...';
+
+                const raw = db.export();
+                db.close();
+
+                const filename = 'full_db.sqlite';
+                downloadFile(raw, filename);
+
+                exportProgress.files.push({ name: filename, size: formatBytes(raw.byteLength) });
+                exportProgress.percent = 100;
+                exportProgress.message = 'Full database exported successfully!';
+            } catch (err) {
+                exportProgress.message = `Error: ${err.message}`;
+            } finally {
+                exportProgress.running = false;
+            }
+        };
+
+        // Export all individual language databases
+        const exportAllIndividualDbs = async () => {
+            if (languages.value.length === 0) return;
+            exportProgress.running = true;
+            exportProgress.files = [];
+            exportProgress.percent = 0;
+
+            try {
+                for (let i = 0; i < languages.value.length; i++) {
+                    const lang = languages.value[i];
+                    exportProgress.message = `Exporting ${lang.name} (${lang.code})...`;
+                    exportProgress.percent = Math.round(((i) / languages.value.length) * 100);
+
+                    const result = await exportSingleLanguageDb(lang.code, lang.name);
+                    exportProgress.files.push(result);
+                }
+                exportProgress.percent = 100;
+                exportProgress.message = `Exported ${exportProgress.files.length} file(s) successfully!`;
+            } catch (err) {
+                exportProgress.message = `Error: ${err.message}`;
+            } finally {
+                exportProgress.running = false;
+            }
+        };
+
         // --- Drag and Drop Sequencing ---
         const dragStart = (index, event) => {
             draggedIndex.value = index;
@@ -1434,6 +1746,8 @@ const app = createApp({
             showCategoryModal, editingCategory, openCategoryModal, closeCategoryModal, saveCategory, deleteCategory, fetchAllCategories,
 
             mediaTestUrl, mediaTestType, testMedia, showExportModal,
+            exportSelectedLanguages, exportProgress,
+            toggleAllLanguages, exportSelectedLanguageDbs, exportFullDb, exportAllIndividualDbs,
 
             dragStart, dragOver, drop, draggedIndex, dropTargetIndex,
             allCategories,
