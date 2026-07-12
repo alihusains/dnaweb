@@ -253,6 +253,58 @@ def create_language_db(source_path, language, output_path):
             english TEXT
         );
 
+        CREATE TABLE IF NOT EXISTS events (
+            id INTEGER PRIMARY KEY,
+            event_group_id INTEGER NOT NULL,
+            hijri_date TEXT,
+            date_long TEXT,
+            color TEXT,
+            event_type TEXT,
+            deeplink_id TEXT,
+            deeplink_id_text TEXT,
+            link_type TEXT,
+            sequence INTEGER DEFAULT 0,
+            language_code TEXT NOT NULL DEFAULT 'gu',
+            title TEXT,
+            description TEXT,
+            is_visible INTEGER DEFAULT 1
+        );
+
+        CREATE TABLE IF NOT EXISTS quran (
+            id INTEGER PRIMARY KEY,
+            quran_id INTEGER NOT NULL,
+            ayat_no INTEGER NOT NULL,
+            arabic TEXT,
+            is_sajda INTEGER DEFAULT 0,
+            juz_no INTEGER,
+            ruku_no INTEGER,
+            page_no INTEGER,
+            sura_name_ar TEXT,
+            sura_name_guj TEXT,
+            sura_name_en TEXT,
+            sura_name_ur TEXT,
+            sura_name_ro TEXT,
+            sura_name_fa TEXT,
+            sura_name_fr TEXT,
+            sura_type TEXT,
+            total_ayat INTEGER,
+            audio_url TEXT,
+            video_url TEXT,
+            sequence INTEGER DEFAULT 0,
+            is_visible INTEGER DEFAULT 1,
+            UNIQUE(quran_id, ayat_no)
+        );
+
+        CREATE TABLE IF NOT EXISTS quran_translations (
+            id INTEGER PRIMARY KEY,
+            quran_id INTEGER NOT NULL,
+            language_code TEXT NOT NULL,
+            translation TEXT,
+            transliteration TEXT,
+            is_visible INTEGER DEFAULT 1,
+            UNIQUE(quran_id, language_code)
+        );
+
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY,
             email TEXT NOT NULL,
@@ -275,6 +327,11 @@ def create_language_db(source_path, language, output_path):
         CREATE INDEX IF NOT EXISTS idx_categories_parent ON categories(parent_id);
         CREATE INDEX IF NOT EXISTS idx_categories_sequence ON categories(sequence);
         CREATE INDEX IF NOT EXISTS idx_item_translations_category ON item_translations(category_id);
+        CREATE INDEX IF NOT EXISTS idx_events_group ON events(event_group_id);
+        CREATE INDEX IF NOT EXISTS idx_events_hijri ON events(hijri_date);
+        CREATE INDEX IF NOT EXISTS idx_events_language ON events(language_code);
+        CREATE INDEX IF NOT EXISTS idx_quran_sura ON quran(quran_id, ayat_no);
+        CREATE INDEX IF NOT EXISTS idx_quran_translations_language ON quran_translations(language_code);
         CREATE INDEX IF NOT EXISTS idx_bookmark_new_item ON legacy_bookmark_map(new_item_id);
         CREATE INDEX IF NOT EXISTS idx_bookmark_new_cat ON legacy_bookmark_map(new_category_id);
     """)
@@ -347,6 +404,55 @@ def create_language_db(source_path, language, output_path):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, row)
 
+    # Copy events for this language
+    event_count = 0
+    try:
+        src_cur.execute("""
+            SELECT id, event_group_id, hijri_date, date_long, color, event_type,
+                   deeplink_id, deeplink_id_text, link_type, sequence,
+                   language_code, title, description, is_visible
+            FROM events WHERE language_code = ? ORDER BY sequence
+        """, (lang_code,))
+        event_rows = src_cur.fetchall()
+
+        for row in event_rows:
+            out_cur.execute("""
+                INSERT INTO events
+                    (id, event_group_id, hijri_date, date_long, color, event_type,
+                     deeplink_id, deeplink_id_text, link_type, sequence,
+                     language_code, title, description, is_visible)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, row)
+        event_count = len(event_rows)
+    except Exception:
+        pass
+
+    # Copy quran (Arabic + shared data, language-independent)
+    quran_count = 0
+    trans_count = 0
+    try:
+        src_cur.execute("SELECT * FROM quran ORDER BY quran_id, ayat_no")
+        ayat_rows = src_cur.fetchall()
+        for row in ayat_rows:
+            out_cur.execute("""
+                INSERT INTO quran (id, quran_id, ayat_no, arabic, is_sajda, juz_no, ruku_no, page_no,
+                    sura_name_ar, sura_name_guj, sura_name_en, sura_name_ur, sura_name_ro, sura_name_fa, sura_name_fr,
+                    sura_type, total_ayat, audio_url, video_url, sequence, is_visible)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, row)
+        quran_count = len(ayat_rows)
+
+        src_cur.execute("SELECT * FROM quran_translations WHERE language_code = ? ORDER BY quran_id", (lang_code,))
+        trans_rows = src_cur.fetchall()
+        for row in trans_rows:
+            out_cur.execute("""
+                INSERT INTO quran_translations (id, quran_id, language_code, translation, transliteration, is_visible)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, row)
+        trans_count = len(trans_rows)
+    except Exception:
+        pass
+
     # Copy users
     src_cur.execute("SELECT id, email, password_hash, role, created_at, github_token FROM users")
     for row in src_cur.fetchall():
@@ -372,7 +478,7 @@ def create_language_db(source_path, language, output_path):
     out_conn.close()
     src_conn.close()
 
-    return len(cat_rows), len(item_rows)
+    return len(cat_rows), len(item_rows), event_count, quran_count, trans_count
 
 
 def main():
@@ -408,11 +514,11 @@ def main():
         output_file = os.path.join(OUTPUT_DIR, f"dna_{lang_code}.sqlite")
 
         print(f"\nGenerating dna_{lang_code}.sqlite ({lang[2]})...")
-        cats, items = create_language_db(export_path, lang, output_file)
+        cats, items, events, quran_suras, quran_ayat = create_language_db(export_path, lang, output_file)
 
         if cats > 0:
             fsize = os.path.getsize(output_file)
-            print(f"  {cats} categories, {items} items, {fsize / 1024:.1f} KB")
+            print(f"  {cats} categories, {items} items, {events} events, {quran_suras} suras, {quran_ayat} quran ayat, {fsize / 1024:.1f} KB")
             total_files += 1
         else:
             print(f"  Skipped (no content)")

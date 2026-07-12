@@ -78,6 +78,58 @@ def create_production_schema(conn):
             english TEXT
         );
 
+        CREATE TABLE IF NOT EXISTS events (
+            id INTEGER PRIMARY KEY,
+            event_group_id INTEGER NOT NULL,
+            hijri_date TEXT,
+            date_long TEXT,
+            color TEXT,
+            event_type TEXT,
+            deeplink_id TEXT,
+            deeplink_id_text TEXT,
+            link_type TEXT,
+            sequence INTEGER DEFAULT 0,
+            language_code TEXT NOT NULL DEFAULT 'gu',
+            title TEXT,
+            description TEXT,
+            is_visible INTEGER DEFAULT 1
+        );
+
+        CREATE TABLE IF NOT EXISTS quran (
+            id INTEGER PRIMARY KEY,
+            quran_id INTEGER NOT NULL,
+            ayat_no INTEGER NOT NULL,
+            arabic TEXT,
+            is_sajda INTEGER DEFAULT 0,
+            juz_no INTEGER,
+            ruku_no INTEGER,
+            page_no INTEGER,
+            sura_name_ar TEXT,
+            sura_name_guj TEXT,
+            sura_name_en TEXT,
+            sura_name_ur TEXT,
+            sura_name_ro TEXT,
+            sura_name_fa TEXT,
+            sura_name_fr TEXT,
+            sura_type TEXT,
+            total_ayat INTEGER,
+            audio_url TEXT,
+            video_url TEXT,
+            sequence INTEGER DEFAULT 0,
+            is_visible INTEGER DEFAULT 1,
+            UNIQUE(quran_id, ayat_no)
+        );
+
+        CREATE TABLE IF NOT EXISTS quran_translations (
+            id INTEGER PRIMARY KEY,
+            quran_id INTEGER NOT NULL,
+            language_code TEXT NOT NULL,
+            translation TEXT,
+            transliteration TEXT,
+            is_visible INTEGER DEFAULT 1,
+            UNIQUE(quran_id, language_code)
+        );
+
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY,
             email TEXT NOT NULL,
@@ -101,6 +153,11 @@ def create_production_schema(conn):
         CREATE INDEX IF NOT EXISTS idx_categories_sequence ON categories(sequence);
         CREATE INDEX IF NOT EXISTS idx_bookmark_new_item ON legacy_bookmark_map(new_item_id);
         CREATE INDEX IF NOT EXISTS idx_bookmark_new_cat ON legacy_bookmark_map(new_category_id);
+        CREATE INDEX IF NOT EXISTS idx_events_group ON events(event_group_id);
+        CREATE INDEX IF NOT EXISTS idx_events_hijri ON events(hijri_date);
+        CREATE INDEX IF NOT EXISTS idx_events_language ON events(language_code);
+        CREATE INDEX IF NOT EXISTS idx_quran_sura ON quran(quran_id, ayat_no);
+        CREATE INDEX IF NOT EXISTS idx_quran_translations_language ON quran_translations(language_code);
     """)
 
     # Match production languages (IDs 1,2,5,6,7)
@@ -299,7 +356,7 @@ def migrate_v2(legacy_conn, output_conn):
 
 
 def migrate_quran(legacy_conn, output_conn):
-    """Migrate quran_final table → categories + item_translations with preserved IDs."""
+    """Migrate quran_final table → quran + quran_translations tables."""
     print("Migrating quran_final...")
     legacy_cur = legacy_conn.cursor()
     output_cur = output_conn.cursor()
@@ -314,17 +371,9 @@ def migrate_quran(legacy_conn, output_conn):
     """)
     rows = legacy_cur.fetchall()
 
-    # Create top-level "Quran" category
-    output_cur.execute("""
-        INSERT INTO categories (parent_id, sequence, lang_name, english_name,
-            is_trans, is_last_level, language_code)
-        VALUES (NULL, 99, 'કુરઆન', 'Quran', 0, 0, 'gu')
-    """)
-    quran_root_id = output_cur.lastrowid
-
     sura_cache = {}
-    migrated_items = 0
-    migrated_categories = 1
+    migrated_suras = 0
+    migrated_ayat = 0
 
     for row in rows:
         (row_id, sura_id, ayat_no, ayat_ar, ayat_guj, transliteration,
@@ -333,64 +382,79 @@ def migrate_quran(legacy_conn, output_conn):
          surawise_audio, video, juz_audio_1, juz_audio_2) = row
 
         legacy_id = int(row_id) if row_id and str(row_id).isdigit() else 0
-        # Offset quran IDs to avoid collision with v2 IDs
+        sura_id_int = int(sura_id) if sura_id and str(sura_id).isdigit() else 0
+        ayat_no_int = int(ayat_no) if ayat_no and str(ayat_no).isdigit() else 0
+
+        # Insert ayat into quran table (per-ayat with Arabic + shared metadata)
         new_item_id = legacy_id + QURAN_ID_OFFSET
 
-        sura_id_str = str(sura_id).strip() if sura_id else '0'
-        sura_name_guj = (sura_name_guj or '').strip()
-        sura_name_ar = (sura_name_ar or '').strip()
+        # Cache sura metadata for reuse
+        if sura_id_int not in sura_cache:
+            sura_cache[sura_id_int] = {
+                'sura_name_ar': (sura_name_ar or '').strip() or None,
+                'sura_name_guj': (sura_name_guj or '').strip() or f'Sura {sura_id_int}',
+                'sura_type': sura_type or None,
+                'total_ayat': int(sura_ayat) if sura_ayat and str(sura_ayat).isdigit() else None,
+                'audio_url': surawise_audio or None,
+                'video_url': video or None,
+            }
+            migrated_suras += 1
 
-        # Create per-sura category
-        if sura_id_str not in sura_cache:
-            output_cur.execute("""
-                INSERT INTO categories (parent_id, sequence, lang_name, english_name,
-                    audio_url, video_url, is_trans, is_last_level, language_code)
-                VALUES (?, ?, ?, ?, ?, ?, 1, 1, 'gu')
-            """, (
-                quran_root_id,
-                int(sura_id_str) if sura_id_str.isdigit() else 0,
-                sura_name_guj or f'Sura {sura_id_str}',
-                sura_name_ar or f'Sura {sura_id_str}',
-                surawise_audio or None,
-                video or None,
-            ))
-            sura_cache[sura_id_str] = output_cur.lastrowid
-            migrated_categories += 1
+        sm = sura_cache[sura_id_int]
 
-        cat_id = sura_cache[sura_id_str]
-
-        # Insert ayat with offset legacy ID
         output_cur.execute("""
-            INSERT INTO item_translations
-                (id, category_id, sequence, language_title, arabic, transliteration, translation, english, is_visible)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+            INSERT INTO quran
+                (id, quran_id, ayat_no, arabic, is_sajda, juz_no, ruku_no, page_no,
+                 sura_name_ar, sura_name_guj, sura_name_en, sura_name_ur, sura_name_ro,
+                 sura_name_fa, sura_name_fr, sura_type, total_ayat, audio_url, video_url,
+                 sequence, is_visible)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, 1)
         """, (
             new_item_id,
-            cat_id,
-            int(ayat_no) if ayat_no and str(ayat_no).isdigit() else 0,
-            f'Ayat {ayat_no}' if ayat_no else None,
+            sura_id_int,
+            ayat_no_int,
             ayat_ar or None,
-            transliteration or None,
-            ayat_guj or None,
-            ayat_notes or None,
+            int(ayat_sajda) if ayat_sajda and str(ayat_sajda).isdigit() else 0,
+            int(juz_no) if juz_no and str(juz_no).isdigit() else None,
+            int(ruku_no) if ruku_no and str(ruku_no).isdigit() else None,
+            int(page_no) if page_no and str(page_no).isdigit() else None,
+            sm['sura_name_ar'],
+            sm['sura_name_guj'],
+            sm['sura_type'],
+            sm['total_ayat'],
+            sm['audio_url'],
+            sm['video_url'],
+            ayat_no_int,
         ))
 
-        # Record in bookmark map
+        # Insert translation (language-specific only)
+        output_cur.execute("""
+            INSERT INTO quran_translations
+                (id, quran_id, language_code, translation, transliteration, is_visible)
+            VALUES (?, ?, 'gu', ?, ?, 1)
+        """, (
+            new_item_id,
+            new_item_id,
+            ayat_guj or None,
+            transliteration or None,
+        ))
+
+        # Record in bookmark map for backward compatibility
         output_cur.execute("""
             INSERT OR REPLACE INTO legacy_bookmark_map
                 (source_table, legacy_id, new_category_id, new_item_id, legacy_title)
-            VALUES (?, ?, ?, ?, ?)
-        """, ('quran_final', legacy_id, cat_id, new_item_id, f'Sura {sura_id_str} Ayat {ayat_no}'))
+            VALUES (?, ?, NULL, ?, ?)
+        """, ('quran_final', legacy_id, new_item_id, f'Sura {sura_id_int} Ayat {ayat_no_int}'))
 
-        migrated_items += 1
+        migrated_ayat += 1
 
     output_conn.commit()
-    print(f"  quran_final: {migrated_categories} categories, {migrated_items} ayat items (IDs offset by {QURAN_ID_OFFSET})")
-    return migrated_categories, migrated_items
+    print(f"  quran_final: {migrated_suras} suras, {migrated_ayat} ayat items (IDs offset by {QURAN_ID_OFFSET})")
+    return 0, migrated_ayat
 
 
 def migrate_events(legacy_conn, output_conn):
-    """Migrate events table → categories + item_translations."""
+    """Migrate events table → dedicated events table."""
     print("Migrating events...")
     legacy_cur = legacy_conn.cursor()
     output_cur = output_conn.cursor()
@@ -403,14 +467,8 @@ def migrate_events(legacy_conn, output_conn):
     """)
     rows = legacy_cur.fetchall()
 
-    output_cur.execute("""
-        INSERT INTO categories (parent_id, sequence, lang_name, english_name,
-            is_trans, is_last_level, language_code)
-        VALUES (NULL, 100, 'ઇવેન્ટ્સ', 'Events', 0, 0, 'gu')
-    """)
-    events_root_id = output_cur.lastrowid
-    migrated_categories = 1
-    migrated_items = 0
+    migrated_events = 0
+    event_group_id = 0
 
     for row in rows:
         (rowid, date, date_long, event, color, deeplink_id_text,
@@ -423,39 +481,32 @@ def migrate_events(legacy_conn, output_conn):
         if not event:
             continue
 
+        event_group_id += 1
+
         output_cur.execute("""
-            INSERT INTO categories (parent_id, sequence, lang_name, english_name,
-                notify_hijri_date, is_trans, is_last_level, language_code)
-            VALUES (?, ?, ?, ?, ?, 1, 1, 'gu')
+            INSERT INTO events
+                (event_group_id, hijri_date, date_long, color, event_type,
+                 deeplink_id, deeplink_id_text, link_type, sequence,
+                 language_code, title, description, is_visible)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'gu', ?, NULL, 1)
         """, (
-            events_root_id,
-            migrated_categories,
-            date_long or date,
-            event[:100],
-            date,
+            event_group_id,
+            date or None,
+            date_long or None,
+            color or None,
+            event_type or None,
+            deeplink_id or None,
+            deeplink_id_text or None,
+            link_type or None,
+            migrated_events + 1,
+            event,
         ))
-        cat_id = output_cur.lastrowid
-        migrated_categories += 1
 
-        output_cur.execute("""
-            INSERT INTO item_translations
-                (category_id, sequence, language_title, arabic, translation, is_visible)
-            VALUES (?, 1, ?, ?, ?, 1)
-        """, (cat_id, date_long or date, None, event))
-
-        item_id = output_cur.lastrowid
-        migrated_items += 1
-
-        # Events don't have legacy IDs, but record by rowid for completeness
-        output_cur.execute("""
-            INSERT OR REPLACE INTO legacy_bookmark_map
-                (source_table, legacy_id, new_category_id, new_item_id, legacy_title)
-            VALUES (?, ?, ?, ?, ?)
-        """, ('events', rowid, cat_id, item_id, date_long or date))
+        migrated_events += 1
 
     output_conn.commit()
-    print(f"  events: {migrated_categories} categories, {migrated_items} event items")
-    return migrated_categories, migrated_items
+    print(f"  events: {migrated_events} event rows (dedicated events table)")
+    return 0, migrated_events
 
 
 def print_bookmark_examples(output_conn):
@@ -524,19 +575,31 @@ def main():
 
         # Verify
         cur = output_conn.cursor()
-        for table in ['categories', 'item_translations', 'languages', 'legacy_bookmark_map']:
+        for table in ['categories', 'item_translations', 'events', 'quran', 'quran_translations', 'languages', 'legacy_bookmark_map']:
             cur.execute(f"SELECT COUNT(*) FROM {table}")
             count = cur.fetchone()[0]
             print(f"  {table}: {count} rows")
 
         print_bookmark_examples(output_conn)
 
-        # Show how to migrate bookmarks
-        print("\n--- Bookmark migration query ---")
-        print("To find the new item_translations.id for a legacy bookmark:")
+        # Show example queries for new schema
+        print("\n--- Example queries ---")
+        print("-- Fetch Quran for a language:")
+        print("  SELECT q.quran_id as sura_id, q.ayat_no, q.arabic,")
+        print("         q.sura_name_ar, q.sura_name_guj, q.sura_name_en,")
+        print("         q.sura_type, q.juz_no, q.ruku_no, q.page_no, q.is_sajda,")
+        print("         t.translation, t.transliteration")
+        print("  FROM quran q")
+        print("  JOIN quran_translations t ON q.id = t.quran_id")
+        print("  WHERE t.language_code = 'gu'")
+        print("  ORDER BY q.quran_id, q.ayat_no;")
+        print("")
+        print("-- Fetch all events for a language:")
+        print("  SELECT * FROM events WHERE language_code = 'gu' ORDER BY sequence;")
+        print("")
+        print("-- Fetch bookmarks:")
         print("  SELECT new_item_id FROM legacy_bookmark_map")
         print("  WHERE source_table='v2' AND legacy_id=<old_bookmark_id>;")
-        print("")
         print("  SELECT new_item_id FROM legacy_bookmark_map")
         print("  WHERE source_table='quran_final' AND legacy_id=<old_bookmark_id>;")
 

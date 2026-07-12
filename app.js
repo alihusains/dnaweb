@@ -816,11 +816,65 @@ const app = createApp({
                 is_visible INTEGER DEFAULT 1,
                 english TEXT
             );
+            CREATE TABLE IF NOT EXISTS events (
+                id INTEGER PRIMARY KEY,
+                event_group_id INTEGER NOT NULL,
+                hijri_date TEXT,
+                date_long TEXT,
+                color TEXT,
+                event_type TEXT,
+                deeplink_id TEXT,
+                deeplink_id_text TEXT,
+                link_type TEXT,
+                sequence INTEGER DEFAULT 0,
+                language_code TEXT NOT NULL DEFAULT 'gu',
+                title TEXT,
+                description TEXT,
+                is_visible INTEGER DEFAULT 1
+            );
+            CREATE TABLE IF NOT EXISTS quran (
+                id INTEGER PRIMARY KEY,
+                quran_id INTEGER NOT NULL,
+                ayat_no INTEGER NOT NULL,
+                arabic TEXT,
+                is_sajda INTEGER DEFAULT 0,
+                juz_no INTEGER,
+                ruku_no INTEGER,
+                page_no INTEGER,
+                sura_name_ar TEXT,
+                sura_name_guj TEXT,
+                sura_name_en TEXT,
+                sura_name_ur TEXT,
+                sura_name_ro TEXT,
+                sura_name_fa TEXT,
+                sura_name_fr TEXT,
+                sura_type TEXT,
+                total_ayat INTEGER,
+                audio_url TEXT,
+                video_url TEXT,
+                sequence INTEGER DEFAULT 0,
+                is_visible INTEGER DEFAULT 1,
+                UNIQUE(quran_id, ayat_no)
+            );
+            CREATE TABLE IF NOT EXISTS quran_translations (
+                id INTEGER PRIMARY KEY,
+                quran_id INTEGER NOT NULL,
+                language_code TEXT NOT NULL,
+                translation TEXT,
+                transliteration TEXT,
+                is_visible INTEGER DEFAULT 1,
+                UNIQUE(quran_id, language_code)
+            );
             CREATE INDEX IF NOT EXISTS idx_categories_english_name ON categories(english_name);
             CREATE INDEX IF NOT EXISTS idx_categories_parent ON categories(parent_id);
             CREATE INDEX IF NOT EXISTS idx_categories_sequence ON categories(sequence);
             CREATE INDEX IF NOT EXISTS idx_categories_language_code ON categories(language_code);
             CREATE INDEX IF NOT EXISTS idx_item_translations_category ON item_translations(category_id);
+            CREATE INDEX IF NOT EXISTS idx_events_group ON events(event_group_id);
+            CREATE INDEX IF NOT EXISTS idx_events_hijri ON events(hijri_date);
+            CREATE INDEX IF NOT EXISTS idx_events_language ON events(language_code);
+            CREATE INDEX IF NOT EXISTS idx_quran_sura ON quran(quran_id, ayat_no);
+            CREATE INDEX IF NOT EXISTS idx_quran_translations_language ON quran_translations(language_code);
         `;
 
         const FULL_SCHEMA_SQL = SCHEMA_SQL + `
@@ -878,10 +932,36 @@ const app = createApp({
                 args: []
             });
 
+            // Fetch events for this language
+            let events = [];
+            try {
+                const eventResult = await libsqlClient.execute({
+                    sql: 'SELECT * FROM events WHERE language_code = ? ORDER BY sequence',
+                    args: [langCode]
+                });
+                events = eventResult.rows;
+            } catch { /* events table may not exist yet */ }
+
+            // Fetch quran data
+            let quran = [];
+            let quranTranslations = [];
+            try {
+                const quranResult = await libsqlClient.execute('SELECT * FROM quran ORDER BY sura_id');
+                quran = quranResult.rows;
+                const transResult = await libsqlClient.execute({
+                    sql: 'SELECT * FROM quran_translations WHERE language_code = ? ORDER BY quran_id, ayat_no',
+                    args: [langCode]
+                });
+                quranTranslations = transResult.rows;
+            } catch { /* quran tables may not exist yet */ }
+
             return {
                 language: langRows[0],
                 categories,
-                items: itemResult.rows
+                items: itemResult.rows,
+                events,
+                quran,
+                quranTranslations
             };
         };
 
@@ -890,11 +970,27 @@ const app = createApp({
             const langResult = await libsqlClient.execute('SELECT * FROM languages ORDER BY id');
             const catResult = await libsqlClient.execute('SELECT * FROM categories ORDER BY id');
             const itemResult = await libsqlClient.execute('SELECT * FROM item_translations ORDER BY id');
+            let events = [];
+            try {
+                const eventResult = await libsqlClient.execute('SELECT * FROM events ORDER BY sequence');
+                events = eventResult.rows;
+            } catch { /* events table may not exist yet */ }
+            let quran = [];
+            let quranTranslations = [];
+            try {
+                const quranResult = await libsqlClient.execute('SELECT * FROM quran ORDER BY sura_id');
+                quran = quranResult.rows;
+                const transResult = await libsqlClient.execute('SELECT * FROM quran_translations ORDER BY quran_id, ayat_no');
+                quranTranslations = transResult.rows;
+            } catch { /* quran tables may not exist yet */ }
 
             return {
                 languages: langResult.rows,
                 categories: catResult.rows,
-                items: itemResult.rows
+                items: itemResult.rows,
+                events,
+                quran,
+                quranTranslations
             };
         };
 
@@ -949,6 +1045,20 @@ const app = createApp({
                 'id', 'category_id', 'sequence', 'language_title',
                 'arabic', 'translation', 'transliteration', 'is_visible', 'english'
             ], data.items);
+            insertRows(db, 'events', [
+                'id', 'event_group_id', 'hijri_date', 'date_long', 'color',
+                'event_type', 'deeplink_id', 'deeplink_id_text', 'link_type',
+                'sequence', 'language_code', 'title', 'description', 'is_visible'
+            ], data.events || []);
+            insertRows(db, 'quran', [
+                'id', 'quran_id', 'ayat_no', 'arabic', 'is_sajda', 'juz_no', 'ruku_no', 'page_no',
+                'sura_name_ar', 'sura_name_guj', 'sura_name_en', 'sura_name_ur', 'sura_name_ro',
+                'sura_name_fa', 'sura_name_fr', 'sura_type', 'total_ayat', 'audio_url', 'video_url',
+                'sequence', 'is_visible'
+            ], data.quran || []);
+            insertRows(db, 'quran_translations', [
+                'id', 'quran_id', 'language_code', 'translation', 'transliteration', 'is_visible'
+            ], data.quranTranslations || []);
 
             const raw = db.export();
             db.close();
@@ -1030,6 +1140,26 @@ const app = createApp({
                     'id', 'category_id', 'sequence', 'language_title',
                     'arabic', 'translation', 'transliteration', 'is_visible', 'english'
                 ], data.items);
+
+                exportProgress.percent = 82;
+                exportProgress.message = 'Inserting events...';
+                insertRows(db, 'events', [
+                    'id', 'event_group_id', 'hijri_date', 'date_long', 'color',
+                    'event_type', 'deeplink_id', 'deeplink_id_text', 'link_type',
+                    'sequence', 'language_code', 'title', 'description', 'is_visible'
+                ], data.events || []);
+
+                exportProgress.percent = 85;
+                exportProgress.message = 'Inserting Quran...';
+                insertRows(db, 'quran', [
+                    'id', 'quran_id', 'ayat_no', 'arabic', 'is_sajda', 'juz_no', 'ruku_no', 'page_no',
+                    'sura_name_ar', 'sura_name_guj', 'sura_name_en', 'sura_name_ur', 'sura_name_ro',
+                    'sura_name_fa', 'sura_name_fr', 'sura_type', 'total_ayat', 'audio_url', 'video_url',
+                    'sequence', 'is_visible'
+                ], data.quran || []);
+                insertRows(db, 'quran_translations', [
+                    'id', 'quran_id', 'language_code', 'translation', 'transliteration', 'is_visible'
+                ], data.quranTranslations || []);
 
                 exportProgress.percent = 90;
                 exportProgress.message = 'Generating file...';

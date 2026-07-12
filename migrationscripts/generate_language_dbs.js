@@ -179,6 +179,58 @@ function generateLanguageDbs(sourcePath, outputDir) {
           english TEXT
       );
 
+      CREATE TABLE IF NOT EXISTS events (
+          id INTEGER PRIMARY KEY,
+          event_group_id INTEGER NOT NULL,
+          hijri_date TEXT,
+          date_long TEXT,
+          color TEXT,
+          event_type TEXT,
+          deeplink_id TEXT,
+          deeplink_id_text TEXT,
+          link_type TEXT,
+          sequence INTEGER DEFAULT 0,
+          language_code TEXT NOT NULL DEFAULT 'gu',
+          title TEXT,
+          description TEXT,
+          is_visible INTEGER DEFAULT 1
+      );
+
+      CREATE TABLE IF NOT EXISTS quran (
+          id INTEGER PRIMARY KEY,
+          quran_id INTEGER NOT NULL,
+          ayat_no INTEGER NOT NULL,
+          arabic TEXT,
+          is_sajda INTEGER DEFAULT 0,
+          juz_no INTEGER,
+          ruku_no INTEGER,
+          page_no INTEGER,
+          sura_name_ar TEXT,
+          sura_name_guj TEXT,
+          sura_name_en TEXT,
+          sura_name_ur TEXT,
+          sura_name_ro TEXT,
+          sura_name_fa TEXT,
+          sura_name_fr TEXT,
+          sura_type TEXT,
+          total_ayat INTEGER,
+          audio_url TEXT,
+          video_url TEXT,
+          sequence INTEGER DEFAULT 0,
+          is_visible INTEGER DEFAULT 1,
+          UNIQUE(quran_id, ayat_no)
+      );
+
+      CREATE TABLE IF NOT EXISTS quran_translations (
+          id INTEGER PRIMARY KEY,
+          quran_id INTEGER NOT NULL,
+          language_code TEXT NOT NULL,
+          translation TEXT,
+          transliteration TEXT,
+          is_visible INTEGER DEFAULT 1,
+          UNIQUE(quran_id, language_code)
+      );
+
       CREATE TABLE IF NOT EXISTS users (
           id INTEGER PRIMARY KEY,
           email TEXT NOT NULL,
@@ -201,6 +253,11 @@ function generateLanguageDbs(sourcePath, outputDir) {
       CREATE INDEX IF NOT EXISTS idx_categories_parent ON categories(parent_id);
       CREATE INDEX IF NOT EXISTS idx_categories_sequence ON categories(sequence);
       CREATE INDEX IF NOT EXISTS idx_item_translations_category ON item_translations(category_id);
+      CREATE INDEX IF NOT EXISTS idx_events_group ON events(event_group_id);
+      CREATE INDEX IF NOT EXISTS idx_events_hijri ON events(hijri_date);
+      CREATE INDEX IF NOT EXISTS idx_events_language ON events(language_code);
+      CREATE INDEX IF NOT EXISTS idx_quran_sura ON quran(quran_id, ayat_no);
+      CREATE INDEX IF NOT EXISTS idx_quran_translations_language ON quran_translations(language_code);
       CREATE INDEX IF NOT EXISTS idx_bookmark_new_item ON legacy_bookmark_map(new_item_id);
       CREATE INDEX IF NOT EXISTS idx_bookmark_new_cat ON legacy_bookmark_map(new_category_id);
     `);
@@ -294,6 +351,81 @@ function generateLanguageDbs(sourcePath, outputDir) {
     });
     insertItems(items);
 
+    // Copy events for this language
+    let eventCount = 0;
+    try {
+      const events = srcDb.prepare(`
+        SELECT id, event_group_id, hijri_date, date_long, color, event_type,
+               deeplink_id, deeplink_id_text, link_type, sequence,
+               language_code, title, description, is_visible
+        FROM events WHERE language_code = ? ORDER BY sequence
+      `).all(lang.code);
+
+      if (events.length > 0) {
+        const insertEvent = outDb.prepare(`
+          INSERT INTO events
+            (id, event_group_id, hijri_date, date_long, color, event_type,
+             deeplink_id, deeplink_id_text, link_type, sequence,
+             language_code, title, description, is_visible)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        const insertEvents = outDb.transaction((rows) => {
+          for (const r of rows) {
+            insertEvent.run(
+              r.id, r.event_group_id, r.hijri_date, r.date_long, r.color,
+              r.event_type, r.deeplink_id, r.deeplink_id_text, r.link_type,
+              r.sequence, r.language_code, r.title, r.description, r.is_visible
+            );
+          }
+        });
+        insertEvents(events);
+        eventCount = events.length;
+      }
+    } catch (e) {
+      // events table may not exist in production yet
+    }
+
+    // Copy quran (Arabic + shared data, language-independent)
+    let quranCount = 0;
+    let transCount = 0;
+    try {
+      const ayat = srcDb.prepare('SELECT * FROM quran ORDER BY quran_id, ayat_no').all();
+      if (ayat.length > 0) {
+        const insertAyat = outDb.prepare(`
+          INSERT INTO quran (id, quran_id, ayat_no, arabic, is_sajda, juz_no, ruku_no, page_no,
+            sura_name_ar, sura_name_guj, sura_name_en, sura_name_ur, sura_name_ro, sura_name_fa, sura_name_fr,
+            sura_type, total_ayat, audio_url, video_url, sequence, is_visible)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        const insertAyatBatch = outDb.transaction((rows) => {
+          for (const r of rows) {
+            insertAyat.run(r.id, r.quran_id, r.ayat_no, r.arabic, r.is_sajda, r.juz_no, r.ruku_no, r.page_no,
+              r.sura_name_ar, r.sura_name_guj, r.sura_name_en, r.sura_name_ur, r.sura_name_ro, r.sura_name_fa, r.sura_name_fr,
+              r.sura_type, r.total_ayat, r.audio_url, r.video_url, r.sequence, r.is_visible);
+          }
+        });
+        insertAyatBatch(ayat);
+        quranCount = ayat.length;
+      }
+
+      const translations = srcDb.prepare('SELECT * FROM quran_translations WHERE language_code = ? ORDER BY quran_id').all(lang.code);
+      if (translations.length > 0) {
+        const insertTrans = outDb.prepare(`
+          INSERT INTO quran_translations (id, quran_id, language_code, translation, transliteration, is_visible)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `);
+        const insertTransBatch = outDb.transaction((rows) => {
+          for (const r of rows) {
+            insertTrans.run(r.id, r.quran_id, r.language_code, r.translation, r.transliteration, r.is_visible);
+          }
+        });
+        insertTransBatch(translations);
+        transCount = translations.length;
+      }
+    } catch (e) {
+      // quran tables may not exist yet
+    }
+
     // Copy users
     const users = srcDb.prepare('SELECT id, email, password_hash, role, created_at, github_token FROM users').all();
     const insertUser = outDb.prepare(
@@ -329,7 +461,7 @@ function generateLanguageDbs(sourcePath, outputDir) {
     outDb.close();
 
     const fileSize = fs.statSync(outputFile).size;
-    console.log(`  ${categories.length} categories, ${items.length} items, ${(fileSize / 1024).toFixed(1)} KB`);
+    console.log(`  ${categories.length} categories, ${items.length} items, ${eventCount} events, ${quranCount} suras, ${transCount} quran ayat, ${(fileSize / 1024).toFixed(1)} KB`);
     totalFiles++;
   }
 
