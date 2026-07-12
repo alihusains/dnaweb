@@ -41,25 +41,17 @@ jobs:
         id: version
         run: |
           INPUT_VERSION="${{ github.event.inputs.version }}"
-          
+
           if [ -n "$INPUT_VERSION" ]; then
-            # Use manual version
             VERSION="$INPUT_VERSION"
             echo "Using manual version: $VERSION"
           else
-            # Auto-increment from version.json
-            CURRENT=$(cat version.json 2>/dev/null | grep -o '"version": "[^"]*"' | cut -d'"' -f4 || echo "2.5.0")
-            
-            # Parse major.minor and increment patch
+            CURRENT=$(cat version.json 2>/dev/null | grep -o '"version": "[^"]*"' | cut -d'"' -f4 || echo "2.57")
             MAJOR=$(echo $CURRENT | cut -d. -f1)
             MINOR=$(echo $CURRENT | cut -d. -f2)
-            PATCH=$(echo $CURRENT | cut -d. -f3)
-            
-            if [ -z "$PATCH" ] || [ "$PATCH" = "" ]; then
-              PATCH=0
-            fi
-            PATCH=$((PATCH + 1))
-            VERSION="${MAJOR}.${MINOR}.${PATCH}"
+            if [ -z "$MINOR" ] || [ "$MINOR" = "" ]; then MINOR=57; fi
+            MINOR=$((MINOR + 1))
+            VERSION="${MAJOR}.${MINOR}"
             echo "Auto-incremented from $CURRENT to $VERSION"
           fi
           
