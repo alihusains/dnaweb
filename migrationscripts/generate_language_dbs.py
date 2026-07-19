@@ -271,8 +271,8 @@ def create_language_db(source_path, language, output_path):
         );
 
         CREATE TABLE IF NOT EXISTS quran (
-            id INTEGER PRIMARY KEY,
-            quran_id INTEGER NOT NULL,
+            ayat_id INTEGER PRIMARY KEY,
+            sura_id INTEGER NOT NULL,
             ayat_no INTEGER NOT NULL,
             arabic TEXT,
             is_sajda INTEGER DEFAULT 0,
@@ -292,17 +292,16 @@ def create_language_db(source_path, language, output_path):
             video_url TEXT,
             sequence INTEGER DEFAULT 0,
             is_visible INTEGER DEFAULT 1,
-            UNIQUE(quran_id, ayat_no)
+            UNIQUE(sura_id, ayat_no)
         );
 
         CREATE TABLE IF NOT EXISTS quran_translations (
-            id INTEGER PRIMARY KEY,
-            quran_id INTEGER NOT NULL,
+            ayat_id INTEGER NOT NULL,
             language_code TEXT NOT NULL,
             translation TEXT,
             transliteration TEXT,
             is_visible INTEGER DEFAULT 1,
-            UNIQUE(quran_id, language_code)
+            PRIMARY KEY(ayat_id, language_code)
         );
 
         CREATE TABLE IF NOT EXISTS users (
@@ -330,7 +329,7 @@ def create_language_db(source_path, language, output_path):
         CREATE INDEX IF NOT EXISTS idx_events_group ON events(event_group_id);
         CREATE INDEX IF NOT EXISTS idx_events_hijri ON events(hijri_date);
         CREATE INDEX IF NOT EXISTS idx_events_language ON events(language_code);
-        CREATE INDEX IF NOT EXISTS idx_quran_sura ON quran(quran_id, ayat_no);
+        CREATE INDEX IF NOT EXISTS idx_quran_sura ON quran(sura_id, ayat_no);
         CREATE INDEX IF NOT EXISTS idx_quran_translations_language ON quran_translations(language_code);
         CREATE INDEX IF NOT EXISTS idx_bookmark_new_item ON legacy_bookmark_map(new_item_id);
         CREATE INDEX IF NOT EXISTS idx_bookmark_new_cat ON legacy_bookmark_map(new_category_id);
@@ -431,24 +430,34 @@ def create_language_db(source_path, language, output_path):
     quran_count = 0
     trans_count = 0
     try:
-        src_cur.execute("SELECT * FROM quran ORDER BY quran_id, ayat_no")
+        src_cur.execute("SELECT * FROM quran ORDER BY sura_id, ayat_no")
         ayat_rows = src_cur.fetchall()
+        ayat_id = 1
         for row in ayat_rows:
+            # Source has: id, quran_id, ayat_no, arabic, ...
+            # Target has: ayat_id, sura_id, ayat_no, arabic, ...
             out_cur.execute("""
-                INSERT INTO quran (id, quran_id, ayat_no, arabic, is_sajda, juz_no, ruku_no, page_no,
+                INSERT INTO quran (ayat_id, sura_id, ayat_no, arabic, is_sajda, juz_no, ruku_no, page_no,
                     sura_name_ar, sura_name_guj, sura_name_en, sura_name_ur, sura_name_ro, sura_name_fa, sura_name_fr,
                     sura_type, total_ayat, audio_url, video_url, sequence, is_visible)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, row)
+            """, (ayat_id, row[1], row[2], row[3], row[4], row[5], row[6], row[7],
+                  row[8], row[9], row[10], row[11], row[12], row[13], row[14],
+                  row[15], row[16], row[17], row[18], row[19], row[20]))
+            ayat_id += 1
         quran_count = len(ayat_rows)
 
-        src_cur.execute("SELECT * FROM quran_translations WHERE language_code = ? ORDER BY quran_id", (lang_code,))
+        src_cur.execute("SELECT * FROM quran_translations WHERE language_code = ? ORDER BY ayat_id", (lang_code,))
         trans_rows = src_cur.fetchall()
+        trans_ayat_id = 1
         for row in trans_rows:
+            # Source has: id, quran_id, language_code, translation, transliteration, is_visible
+            # Target has: ayat_id, language_code, translation, transliteration, is_visible
             out_cur.execute("""
-                INSERT INTO quran_translations (id, quran_id, language_code, translation, transliteration, is_visible)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, row)
+                INSERT INTO quran_translations (ayat_id, language_code, translation, transliteration, is_visible)
+                VALUES (?, ?, ?, ?, ?)
+            """, (trans_ayat_id, row[2], row[3], row[4], row[5]))
+            trans_ayat_id += 1
         trans_count = len(trans_rows)
     except Exception:
         pass

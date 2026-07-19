@@ -197,8 +197,8 @@ function generateLanguageDbs(sourcePath, outputDir) {
       );
 
       CREATE TABLE IF NOT EXISTS quran (
-          id INTEGER PRIMARY KEY,
-          quran_id INTEGER NOT NULL,
+          ayat_id INTEGER PRIMARY KEY,
+          sura_id INTEGER NOT NULL,
           ayat_no INTEGER NOT NULL,
           arabic TEXT,
           is_sajda INTEGER DEFAULT 0,
@@ -218,17 +218,16 @@ function generateLanguageDbs(sourcePath, outputDir) {
           video_url TEXT,
           sequence INTEGER DEFAULT 0,
           is_visible INTEGER DEFAULT 1,
-          UNIQUE(quran_id, ayat_no)
+          UNIQUE(sura_id, ayat_no)
       );
 
       CREATE TABLE IF NOT EXISTS quran_translations (
-          id INTEGER PRIMARY KEY,
-          quran_id INTEGER NOT NULL,
+          ayat_id INTEGER NOT NULL,
           language_code TEXT NOT NULL,
           translation TEXT,
           transliteration TEXT,
           is_visible INTEGER DEFAULT 1,
-          UNIQUE(quran_id, language_code)
+          PRIMARY KEY(ayat_id, language_code)
       );
 
       CREATE TABLE IF NOT EXISTS users (
@@ -256,7 +255,7 @@ function generateLanguageDbs(sourcePath, outputDir) {
       CREATE INDEX IF NOT EXISTS idx_events_group ON events(event_group_id);
       CREATE INDEX IF NOT EXISTS idx_events_hijri ON events(hijri_date);
       CREATE INDEX IF NOT EXISTS idx_events_language ON events(language_code);
-      CREATE INDEX IF NOT EXISTS idx_quran_sura ON quran(quran_id, ayat_no);
+      CREATE INDEX IF NOT EXISTS idx_quran_sura ON quran(sura_id, ayat_no);
       CREATE INDEX IF NOT EXISTS idx_quran_translations_language ON quran_translations(language_code);
       CREATE INDEX IF NOT EXISTS idx_bookmark_new_item ON legacy_bookmark_map(new_item_id);
       CREATE INDEX IF NOT EXISTS idx_bookmark_new_cat ON legacy_bookmark_map(new_category_id);
@@ -389,17 +388,18 @@ function generateLanguageDbs(sourcePath, outputDir) {
     let quranCount = 0;
     let transCount = 0;
     try {
-      const ayat = srcDb.prepare('SELECT * FROM quran ORDER BY quran_id, ayat_no').all();
+      const ayat = srcDb.prepare('SELECT * FROM quran ORDER BY sura_id, ayat_no').all();
       if (ayat.length > 0) {
         const insertAyat = outDb.prepare(`
-          INSERT INTO quran (id, quran_id, ayat_no, arabic, is_sajda, juz_no, ruku_no, page_no,
+          INSERT INTO quran (ayat_id, sura_id, ayat_no, arabic, is_sajda, juz_no, ruku_no, page_no,
             sura_name_ar, sura_name_guj, sura_name_en, sura_name_ur, sura_name_ro, sura_name_fa, sura_name_fr,
             sura_type, total_ayat, audio_url, video_url, sequence, is_visible)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
+        let ayatId = 1;
         const insertAyatBatch = outDb.transaction((rows) => {
           for (const r of rows) {
-            insertAyat.run(r.id, r.quran_id, r.ayat_no, r.arabic, r.is_sajda, r.juz_no, r.ruku_no, r.page_no,
+            insertAyat.run(ayatId++, r.sura_id, r.ayat_no, r.arabic, r.is_sajda, r.juz_no, r.ruku_no, r.page_no,
               r.sura_name_ar, r.sura_name_guj, r.sura_name_en, r.sura_name_ur, r.sura_name_ro, r.sura_name_fa, r.sura_name_fr,
               r.sura_type, r.total_ayat, r.audio_url, r.video_url, r.sequence, r.is_visible);
           }
@@ -408,15 +408,16 @@ function generateLanguageDbs(sourcePath, outputDir) {
         quranCount = ayat.length;
       }
 
-      const translations = srcDb.prepare('SELECT * FROM quran_translations WHERE language_code = ? ORDER BY quran_id').all(lang.code);
+      const translations = srcDb.prepare('SELECT * FROM quran_translations WHERE language_code = ? ORDER BY ayat_id').all(lang.code);
       if (translations.length > 0) {
         const insertTrans = outDb.prepare(`
-          INSERT INTO quran_translations (id, quran_id, language_code, translation, transliteration, is_visible)
-          VALUES (?, ?, ?, ?, ?, ?)
+          INSERT INTO quran_translations (ayat_id, language_code, translation, transliteration, is_visible)
+          VALUES (?, ?, ?, ?, ?)
         `);
+        let transAyatId = 1;
         const insertTransBatch = outDb.transaction((rows) => {
           for (const r of rows) {
-            insertTrans.run(r.id, r.quran_id, r.language_code, r.translation, r.transliteration, r.is_visible);
+            insertTrans.run(transAyatId++, r.language_code, r.translation, r.transliteration, r.is_visible);
           }
         });
         insertTransBatch(translations);

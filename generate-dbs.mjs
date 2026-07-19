@@ -31,20 +31,36 @@ async function main() {
     console.log(`  legacy_bookmark_map: ${data.legacy_bookmark_map.length} rows`);
   } catch { console.log('  legacy_bookmark_map: not found'); }
 
+  // Rename columns for new schema and assign sequential ayat_id
+  const ayatIdMap = new Map();
+  if (data.quran) {
+    data.quran = data.quran.map((r, i) => {
+      const { id, quran_id, ...rest } = r;
+      ayatIdMap.set(id, i + 1);
+      return { ayat_id: i + 1, sura_id: quran_id, ...rest };
+    });
+  }
+  if (data.quran_translations) {
+    data.quran_translations = data.quran_translations.map(r => {
+      const { id, quran_id, ...rest } = r;
+      return { ayat_id: ayatIdMap.get(id) ?? id, ...rest };
+    });
+  }
+
   // Full database
   console.log('\n--- Generating full database ---');
-  createFullDb(`${OUTPUT_DIR}/database.sqlite`, data);
-  encrypt(`${OUTPUT_DIR}/database.sqlite`);
-  console.log(`  database.sqlite: ${(fs.statSync(`${OUTPUT_DIR}/database.sqlite`).size / 1024).toFixed(1)} KB`);
+  createFullDb(`${OUTPUT_DIR}/dnaapp.sqlite`, data);
+  encrypt(`${OUTPUT_DIR}/dnaapp.sqlite`);
+  console.log(`  dnaapp.sqlite: ${(fs.statSync(`${OUTPUT_DIR}/dnaapp.sqlite`).size / 1024).toFixed(1)} KB`);
 
   // Per-language databases
   console.log(`\n--- Per-language databases (${data.languages.length}) ---`);
   for (const lang of data.languages) {
-    const file = `${OUTPUT_DIR}/database_${lang.code}.sqlite`;
+    const file = `${OUTPUT_DIR}/dnaapp_${lang.code}.sqlite`;
     createLanguageDb(file, lang.code, data);
     if (fs.existsSync(file)) {
       encrypt(file);
-      console.log(`  database_${lang.code}.sqlite: ${(fs.statSync(file).size / 1024).toFixed(1)} KB`);
+      console.log(`  dnaapp_${lang.code}.sqlite: ${(fs.statSync(file).size / 1024).toFixed(1)} KB`);
     }
   }
 
@@ -118,11 +134,10 @@ function createLanguageDb(out, langCode, data) {
       );
     }
   }
-  // Quran tables (quran has Arabic + shared data, translations are per-language)
   if (data.quran) {
     for (const ayat of data.quran) {
-      db.prepare('INSERT INTO quran VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(
-        ayat.id, ayat.quran_id, ayat.ayat_no, ayat.arabic, ayat.is_sajda, ayat.juz_no, ayat.ruku_no, ayat.page_no,
+      db.prepare('INSERT INTO quran (ayat_id, sura_id, ayat_no, arabic, is_sajda, juz_no, ruku_no, page_no, sura_name_ar, sura_name_guj, sura_name_en, sura_name_ur, sura_name_ro, sura_name_fa, sura_name_fr, sura_type, total_ayat, audio_url, video_url, sequence, is_visible) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(
+        ayat.ayat_id, ayat.sura_id, ayat.ayat_no, ayat.arabic, ayat.is_sajda, ayat.juz_no, ayat.ruku_no, ayat.page_no,
         ayat.sura_name_ar, ayat.sura_name_guj, ayat.sura_name_en, ayat.sura_name_ur,
         ayat.sura_name_ro, ayat.sura_name_fa, ayat.sura_name_fr, ayat.sura_type,
         ayat.total_ayat, ayat.audio_url, ayat.video_url, ayat.sequence, ayat.is_visible
@@ -132,8 +147,8 @@ function createLanguageDb(out, langCode, data) {
   if (data.quran_translations) {
     const langTranslations = data.quran_translations.filter(t => t.language_code === langCode);
     for (const t of langTranslations) {
-      db.prepare('INSERT INTO quran_translations VALUES (?,?,?,?,?,?)').run(
-        t.id, t.quran_id, t.language_code, t.translation, t.transliteration, t.is_visible
+      db.prepare('INSERT INTO quran_translations (ayat_id, language_code, translation, transliteration, is_visible) VALUES (?,?,?,?,?)').run(
+        t.ayat_id, t.language_code, t.translation, t.transliteration, t.is_visible
       );
     }
   }
@@ -164,8 +179,8 @@ const SCHEMA = `
   CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY, parent_id INTEGER, sequence INTEGER DEFAULT 0, lang_name TEXT, english_name TEXT, audio_url TEXT, video_url TEXT, duas_url TEXT, local_audio_url TEXT, local_video_url TEXT, is_trans INTEGER DEFAULT 0, related1 INTEGER, related2 INTEGER, notify_hijri_date TEXT, label1 TEXT, label2 TEXT, is_last_level INTEGER DEFAULT 0, language_code TEXT DEFAULT 'gu', content_source_id INTEGER);
   CREATE TABLE IF NOT EXISTS item_translations (id INTEGER PRIMARY KEY, category_id INTEGER NOT NULL, sequence INTEGER DEFAULT 0, language_title TEXT, arabic TEXT, translation TEXT, transliteration TEXT, is_visible INTEGER DEFAULT 1, english TEXT);
   CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, event_group_id INTEGER NOT NULL, hijri_date TEXT, date_long TEXT, color TEXT, event_type TEXT, deeplink_id TEXT, deeplink_id_text TEXT, link_type TEXT, sequence INTEGER DEFAULT 0, language_code TEXT NOT NULL DEFAULT 'gu', title TEXT, description TEXT, is_visible INTEGER DEFAULT 1);
-  CREATE TABLE IF NOT EXISTS quran (id INTEGER PRIMARY KEY, quran_id INTEGER NOT NULL, ayat_no INTEGER NOT NULL, arabic TEXT, is_sajda INTEGER DEFAULT 0, juz_no INTEGER, ruku_no INTEGER, page_no INTEGER, sura_name_ar TEXT, sura_name_guj TEXT, sura_name_en TEXT, sura_name_ur TEXT, sura_name_ro TEXT, sura_name_fa TEXT, sura_name_fr TEXT, sura_type TEXT, total_ayat INTEGER, audio_url TEXT, video_url TEXT, sequence INTEGER DEFAULT 0, is_visible INTEGER DEFAULT 1, UNIQUE(quran_id, ayat_no));
-  CREATE TABLE IF NOT EXISTS quran_translations (id INTEGER PRIMARY KEY, quran_id INTEGER NOT NULL, language_code TEXT NOT NULL, translation TEXT, transliteration TEXT, is_visible INTEGER DEFAULT 1, UNIQUE(quran_id, language_code));
+  CREATE TABLE IF NOT EXISTS quran (ayat_id INTEGER PRIMARY KEY, sura_id INTEGER NOT NULL, ayat_no INTEGER NOT NULL, arabic TEXT, is_sajda INTEGER DEFAULT 0, juz_no INTEGER, ruku_no INTEGER, page_no INTEGER, sura_name_ar TEXT, sura_name_guj TEXT, sura_name_en TEXT, sura_name_ur TEXT, sura_name_ro TEXT, sura_name_fa TEXT, sura_name_fr TEXT, sura_type TEXT, total_ayat INTEGER, audio_url TEXT, video_url TEXT, sequence INTEGER DEFAULT 0, is_visible INTEGER DEFAULT 1, UNIQUE(sura_id, ayat_no));
+  CREATE TABLE IF NOT EXISTS quran_translations (ayat_id INTEGER NOT NULL, language_code TEXT NOT NULL, translation TEXT, transliteration TEXT, is_visible INTEGER DEFAULT 1, PRIMARY KEY(ayat_id, language_code));
   CREATE INDEX IF NOT EXISTS idx_categories_english_name ON categories(english_name);
   CREATE INDEX IF NOT EXISTS idx_categories_parent ON categories(parent_id);
   CREATE INDEX IF NOT EXISTS idx_categories_sequence ON categories(sequence);
@@ -174,7 +189,7 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_events_group ON events(event_group_id);
   CREATE INDEX IF NOT EXISTS idx_events_hijri ON events(hijri_date);
   CREATE INDEX IF NOT EXISTS idx_events_language ON events(language_code);
-  CREATE INDEX IF NOT EXISTS idx_quran_sura ON quran(quran_id, ayat_no);
+  CREATE INDEX IF NOT EXISTS idx_quran_sura ON quran(sura_id, ayat_no);
   CREATE INDEX IF NOT EXISTS idx_quran_translations_language ON quran_translations(language_code);
 `;
 

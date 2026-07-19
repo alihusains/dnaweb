@@ -833,8 +833,8 @@ const app = createApp({
                 is_visible INTEGER DEFAULT 1
             );
             CREATE TABLE IF NOT EXISTS quran (
-                id INTEGER PRIMARY KEY,
-                quran_id INTEGER NOT NULL,
+                ayat_id INTEGER PRIMARY KEY,
+                sura_id INTEGER NOT NULL,
                 ayat_no INTEGER NOT NULL,
                 arabic TEXT,
                 is_sajda INTEGER DEFAULT 0,
@@ -854,16 +854,15 @@ const app = createApp({
                 video_url TEXT,
                 sequence INTEGER DEFAULT 0,
                 is_visible INTEGER DEFAULT 1,
-                UNIQUE(quran_id, ayat_no)
+                UNIQUE(sura_id, ayat_no)
             );
             CREATE TABLE IF NOT EXISTS quran_translations (
-                id INTEGER PRIMARY KEY,
-                quran_id INTEGER NOT NULL,
+                ayat_id INTEGER NOT NULL,
                 language_code TEXT NOT NULL,
                 translation TEXT,
                 transliteration TEXT,
                 is_visible INTEGER DEFAULT 1,
-                UNIQUE(quran_id, language_code)
+                PRIMARY KEY(ayat_id, language_code)
             );
             CREATE INDEX IF NOT EXISTS idx_categories_english_name ON categories(english_name);
             CREATE INDEX IF NOT EXISTS idx_categories_parent ON categories(parent_id);
@@ -873,7 +872,7 @@ const app = createApp({
             CREATE INDEX IF NOT EXISTS idx_events_group ON events(event_group_id);
             CREATE INDEX IF NOT EXISTS idx_events_hijri ON events(hijri_date);
             CREATE INDEX IF NOT EXISTS idx_events_language ON events(language_code);
-            CREATE INDEX IF NOT EXISTS idx_quran_sura ON quran(quran_id, ayat_no);
+            CREATE INDEX IF NOT EXISTS idx_quran_sura ON quran(sura_id, ayat_no);
             CREATE INDEX IF NOT EXISTS idx_quran_translations_language ON quran_translations(language_code);
         `;
 
@@ -949,7 +948,7 @@ const app = createApp({
                 const quranResult = await libsqlClient.execute('SELECT * FROM quran ORDER BY sura_id');
                 quran = quranResult.rows;
                 const transResult = await libsqlClient.execute({
-                    sql: 'SELECT * FROM quran_translations WHERE language_code = ? ORDER BY quran_id, ayat_no',
+                    sql: 'SELECT * FROM quran_translations WHERE language_code = ? ORDER BY ayat_id',
                     args: [langCode]
                 });
                 quranTranslations = transResult.rows;
@@ -980,7 +979,7 @@ const app = createApp({
             try {
                 const quranResult = await libsqlClient.execute('SELECT * FROM quran ORDER BY sura_id');
                 quran = quranResult.rows;
-                const transResult = await libsqlClient.execute('SELECT * FROM quran_translations ORDER BY quran_id, ayat_no');
+                const transResult = await libsqlClient.execute('SELECT * FROM quran_translations ORDER BY ayat_id');
                 quranTranslations = transResult.rows;
             } catch { /* quran tables may not exist yet */ }
 
@@ -1051,19 +1050,19 @@ const app = createApp({
                 'sequence', 'language_code', 'title', 'description', 'is_visible'
             ], data.events || []);
             insertRows(db, 'quran', [
-                'id', 'quran_id', 'ayat_no', 'arabic', 'is_sajda', 'juz_no', 'ruku_no', 'page_no',
+                'ayat_id', 'sura_id', 'ayat_no', 'arabic', 'is_sajda', 'juz_no', 'ruku_no', 'page_no',
                 'sura_name_ar', 'sura_name_guj', 'sura_name_en', 'sura_name_ur', 'sura_name_ro',
                 'sura_name_fa', 'sura_name_fr', 'sura_type', 'total_ayat', 'audio_url', 'video_url',
                 'sequence', 'is_visible'
             ], data.quran || []);
             insertRows(db, 'quran_translations', [
-                'id', 'quran_id', 'language_code', 'translation', 'transliteration', 'is_visible'
+                'ayat_id', 'language_code', 'translation', 'transliteration', 'is_visible'
             ], data.quranTranslations || []);
 
             const raw = db.export();
             db.close();
 
-            const filename = `database_${langCode}.sqlite`;
+            const filename = `dnaapp_${langCode}.sqlite`;
             downloadFile(raw, filename);
 
             return { name: filename, size: formatBytes(raw.byteLength) };
@@ -1152,13 +1151,13 @@ const app = createApp({
                 exportProgress.percent = 85;
                 exportProgress.message = 'Inserting Quran...';
                 insertRows(db, 'quran', [
-                    'id', 'quran_id', 'ayat_no', 'arabic', 'is_sajda', 'juz_no', 'ruku_no', 'page_no',
+                    'ayat_id', 'sura_id', 'ayat_no', 'arabic', 'is_sajda', 'juz_no', 'ruku_no', 'page_no',
                     'sura_name_ar', 'sura_name_guj', 'sura_name_en', 'sura_name_ur', 'sura_name_ro',
                     'sura_name_fa', 'sura_name_fr', 'sura_type', 'total_ayat', 'audio_url', 'video_url',
                     'sequence', 'is_visible'
                 ], data.quran || []);
                 insertRows(db, 'quran_translations', [
-                    'id', 'quran_id', 'language_code', 'translation', 'transliteration', 'is_visible'
+                    'ayat_id', 'language_code', 'translation', 'transliteration', 'is_visible'
                 ], data.quranTranslations || []);
 
                 exportProgress.percent = 90;
@@ -1167,7 +1166,7 @@ const app = createApp({
                 const raw = db.export();
                 db.close();
 
-                const filename = 'full_db.sqlite';
+                const filename = 'dnaapp.sqlite';
                 downloadFile(raw, filename);
 
                 exportProgress.files.push({ name: filename, size: formatBytes(raw.byteLength) });

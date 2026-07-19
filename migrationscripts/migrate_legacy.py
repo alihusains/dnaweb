@@ -14,7 +14,7 @@ Production tables:
   - users: Admin users (not migrated)
 
 Backward compatibility:
-  - v2.id is preserved as item_translations.id (offset by QURAN_ID_OFFSET for quran)
+  - v2.id is preserved as item_translations.id (ayat_id starts from 1 for quran)
   - legacy_bookmark_map table maps (source_table, legacy_id) → new item_translations.id
   - Apps can query: SELECT new_id FROM legacy_bookmark_map WHERE source='v2' AND legacy_id=?
 """
@@ -25,11 +25,6 @@ from pathlib import Path
 
 LEGACY_DB = "legacy.sqlite"
 OUTPUT_DB = "migrated.sqlite"
-
-# Offset quran IDs to avoid collision with v2 IDs
-# v2 has ~1078 rows, duplicates may push IDs higher
-# Use 500000 to be well out of range
-QURAN_ID_OFFSET = 500000
 
 
 def create_production_schema(conn):
@@ -96,8 +91,8 @@ def create_production_schema(conn):
         );
 
         CREATE TABLE IF NOT EXISTS quran (
-            id INTEGER PRIMARY KEY,
-            quran_id INTEGER NOT NULL,
+            ayat_id INTEGER PRIMARY KEY,
+            sura_id INTEGER NOT NULL,
             ayat_no INTEGER NOT NULL,
             arabic TEXT,
             is_sajda INTEGER DEFAULT 0,
@@ -117,17 +112,16 @@ def create_production_schema(conn):
             video_url TEXT,
             sequence INTEGER DEFAULT 0,
             is_visible INTEGER DEFAULT 1,
-            UNIQUE(quran_id, ayat_no)
+            UNIQUE(sura_id, ayat_no)
         );
 
         CREATE TABLE IF NOT EXISTS quran_translations (
-            id INTEGER PRIMARY KEY,
-            quran_id INTEGER NOT NULL,
+            ayat_id INTEGER NOT NULL,
             language_code TEXT NOT NULL,
             translation TEXT,
             transliteration TEXT,
             is_visible INTEGER DEFAULT 1,
-            UNIQUE(quran_id, language_code)
+            PRIMARY KEY(ayat_id, language_code)
         );
 
         CREATE TABLE IF NOT EXISTS users (
@@ -156,7 +150,7 @@ def create_production_schema(conn):
         CREATE INDEX IF NOT EXISTS idx_events_group ON events(event_group_id);
         CREATE INDEX IF NOT EXISTS idx_events_hijri ON events(hijri_date);
         CREATE INDEX IF NOT EXISTS idx_events_language ON events(language_code);
-        CREATE INDEX IF NOT EXISTS idx_quran_sura ON quran(quran_id, ayat_no);
+        CREATE INDEX IF NOT EXISTS idx_quran_sura ON quran(sura_id, ayat_no);
         CREATE INDEX IF NOT EXISTS idx_quran_translations_language ON quran_translations(language_code);
     """)
 
@@ -374,6 +368,7 @@ def migrate_quran(legacy_conn, output_conn):
     sura_cache = {}
     migrated_suras = 0
     migrated_ayat = 0
+    ayat_id_counter = 0
 
     for row in rows:
         (row_id, sura_id, ayat_no, ayat_ar, ayat_guj, transliteration,
@@ -386,7 +381,7 @@ def migrate_quran(legacy_conn, output_conn):
         ayat_no_int = int(ayat_no) if ayat_no and str(ayat_no).isdigit() else 0
 
         # Insert ayat into quran table (per-ayat with Arabic + shared metadata)
-        new_item_id = legacy_id + QURAN_ID_OFFSET
+        ayat_id_counter += 1
 
         # Cache sura metadata for reuse
         if sura_id_int not in sura_cache:
@@ -404,13 +399,13 @@ def migrate_quran(legacy_conn, output_conn):
 
         output_cur.execute("""
             INSERT INTO quran
-                (id, quran_id, ayat_no, arabic, is_sajda, juz_no, ruku_no, page_no,
+                (ayat_id, sura_id, ayat_no, arabic, is_sajda, juz_no, ruku_no, page_no,
                  sura_name_ar, sura_name_guj, sura_name_en, sura_name_ur, sura_name_ro,
                  sura_name_fa, sura_name_fr, sura_type, total_ayat, audio_url, video_url,
                  sequence, is_visible)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, 1)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, 1)
         """, (
-            new_item_id,
+            ayat_id_counter,
             sura_id_int,
             ayat_no_int,
             ayat_ar or None,
@@ -430,11 +425,10 @@ def migrate_quran(legacy_conn, output_conn):
         # Insert translation (language-specific only)
         output_cur.execute("""
             INSERT INTO quran_translations
-                (id, quran_id, language_code, translation, transliteration, is_visible)
-            VALUES (?, ?, 'gu', ?, ?, 1)
+                (ayat_id, language_code, translation, transliteration, is_visible)
+            VALUES (?, 'gu', ?, ?, 1)
         """, (
-            new_item_id,
-            new_item_id,
+            ayat_id_counter,
             ayat_guj or None,
             transliteration or None,
         ))
@@ -444,12 +438,12 @@ def migrate_quran(legacy_conn, output_conn):
             INSERT OR REPLACE INTO legacy_bookmark_map
                 (source_table, legacy_id, new_category_id, new_item_id, legacy_title)
             VALUES (?, ?, NULL, ?, ?)
-        """, ('quran_final', legacy_id, new_item_id, f'Sura {sura_id_int} Ayat {ayat_no_int}'))
+        """, ('quran_final', legacy_id, ayat_id_counter, f'Sura {sura_id_int} Ayat {ayat_no_int}'))
 
         migrated_ayat += 1
 
     output_conn.commit()
-    print(f"  quran_final: {migrated_suras} suras, {migrated_ayat} ayat items (IDs offset by {QURAN_ID_OFFSET})")
+    print(f"  quran_final: {migrated_suras} suras, {migrated_ayat} ayat items")
     return 0, migrated_ayat
 
 
@@ -585,14 +579,14 @@ def main():
         # Show example queries for new schema
         print("\n--- Example queries ---")
         print("-- Fetch Quran for a language:")
-        print("  SELECT q.quran_id as sura_id, q.ayat_no, q.arabic,")
+        print("  SELECT q.ayat_id, q.sura_id, q.ayat_no, q.arabic,")
         print("         q.sura_name_ar, q.sura_name_guj, q.sura_name_en,")
         print("         q.sura_type, q.juz_no, q.ruku_no, q.page_no, q.is_sajda,")
         print("         t.translation, t.transliteration")
         print("  FROM quran q")
-        print("  JOIN quran_translations t ON q.id = t.quran_id")
+        print("  JOIN quran_translations t ON q.ayat_id = t.ayat_id")
         print("  WHERE t.language_code = 'gu'")
-        print("  ORDER BY q.quran_id, q.ayat_no;")
+        print("  ORDER BY q.sura_id, q.ayat_no;")
         print("")
         print("-- Fetch all events for a language:")
         print("  SELECT * FROM events WHERE language_code = 'gu' ORDER BY sequence;")
