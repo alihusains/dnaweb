@@ -121,7 +121,7 @@ function createLanguageDb(out, langCode, data) {
   // Quran tables (quran has Arabic + shared data, translations are per-language)
   if (data.quran) {
     for (const ayat of data.quran) {
-      db.prepare('INSERT INTO quran VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(
+      db.prepare('INSERT INTO quran VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(
         ayat.id, ayat.quran_id, ayat.ayat_no, ayat.arabic, ayat.is_sajda, ayat.juz_no, ayat.ruku_no, ayat.page_no,
         ayat.sura_name_ar, ayat.sura_name_guj, ayat.sura_name_en, ayat.sura_name_ur,
         ayat.sura_name_ro, ayat.sura_name_fa, ayat.sura_name_fr, ayat.sura_type,
