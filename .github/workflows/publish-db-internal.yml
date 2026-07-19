@@ -64,7 +64,7 @@ jobs:
           fi
           echo "DB_BRANCH=${BRANCH}" >> $GITHUB_ENV
           echo "DB_VERSION=${{ steps.version.outputs.VERSION }}" >> $GITHUB_ENV
-          echo "DB_PASSWORD=Mimalif@110" >> $GITHUB_ENV
+          echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> $GITHUB_ENV
 
       - name: Generate databases
         run: node generate-dbs.mjs
