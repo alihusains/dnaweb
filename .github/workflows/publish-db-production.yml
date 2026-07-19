@@ -89,5 +89,5 @@ jobs:
           body: |
             **Branch:** ${{ env.DB_BRANCH }}
 
-            Files: `dnaapp.sqlite` + `dnaapp_{lang}.sqlite`
+            Files: `database.sqlite` + `database_{lang}.sqlite`
           files: release_files/*

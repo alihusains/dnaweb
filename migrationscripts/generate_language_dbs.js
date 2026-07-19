@@ -222,12 +222,13 @@ function generateLanguageDbs(sourcePath, outputDir) {
       );
 
       CREATE TABLE IF NOT EXISTS quran_translations (
+          id INTEGER PRIMARY KEY,
           ayat_id INTEGER NOT NULL,
           language_code TEXT NOT NULL,
           translation TEXT,
           transliteration TEXT,
           is_visible INTEGER DEFAULT 1,
-          PRIMARY KEY(ayat_id, language_code)
+          UNIQUE(ayat_id, language_code)
       );
 
       CREATE TABLE IF NOT EXISTS users (
@@ -411,13 +412,13 @@ function generateLanguageDbs(sourcePath, outputDir) {
       const translations = srcDb.prepare('SELECT * FROM quran_translations WHERE language_code = ? ORDER BY ayat_id').all(lang.code);
       if (translations.length > 0) {
         const insertTrans = outDb.prepare(`
-          INSERT INTO quran_translations (ayat_id, language_code, translation, transliteration, is_visible)
-          VALUES (?, ?, ?, ?, ?)
+          INSERT INTO quran_translations (id, ayat_id, language_code, translation, transliteration, is_visible)
+          VALUES (?, ?, ?, ?, ?, ?)
         `);
-        let transAyatId = 1;
+        let transId = 1;
         const insertTransBatch = outDb.transaction((rows) => {
           for (const r of rows) {
-            insertTrans.run(transAyatId++, r.language_code, r.translation, r.transliteration, r.is_visible);
+            insertTrans.run(transId++, r.ayat_id, r.language_code, r.translation, r.transliteration, r.is_visible);
           }
         });
         insertTransBatch(translations);

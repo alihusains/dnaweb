@@ -96,7 +96,7 @@ jobs:
             const password = process.env.DB_PASSWORD;
             const branch = process.env.DB_BRANCH || 'production';
 
-            const dbName = `dnaapp.sqlite`;
+            const dbName = `database.sqlite`;
             const tempDb = `temp_v${version}.db`;
 
             console.log(`Generating version ${version} from ${branch} branch with tables: ${tables.join(', ')}`);

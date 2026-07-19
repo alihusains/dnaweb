@@ -116,12 +116,13 @@ def create_production_schema(conn):
         );
 
         CREATE TABLE IF NOT EXISTS quran_translations (
+            id INTEGER PRIMARY KEY,
             ayat_id INTEGER NOT NULL,
             language_code TEXT NOT NULL,
             translation TEXT,
             transliteration TEXT,
             is_visible INTEGER DEFAULT 1,
-            PRIMARY KEY(ayat_id, language_code)
+            UNIQUE(ayat_id, language_code)
         );
 
         CREATE TABLE IF NOT EXISTS users (

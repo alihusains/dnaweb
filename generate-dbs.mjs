@@ -49,18 +49,18 @@ async function main() {
 
   // Full database
   console.log('\n--- Generating full database ---');
-  createFullDb(`${OUTPUT_DIR}/dnaapp.sqlite`, data);
-  encrypt(`${OUTPUT_DIR}/dnaapp.sqlite`);
-  console.log(`  dnaapp.sqlite: ${(fs.statSync(`${OUTPUT_DIR}/dnaapp.sqlite`).size / 1024).toFixed(1)} KB`);
+  createFullDb(`${OUTPUT_DIR}/database.sqlite`, data);
+  encrypt(`${OUTPUT_DIR}/database.sqlite`);
+  console.log(`  database.sqlite: ${(fs.statSync(`${OUTPUT_DIR}/database.sqlite`).size / 1024).toFixed(1)} KB`);
 
   // Per-language databases
   console.log(`\n--- Per-language databases (${data.languages.length}) ---`);
   for (const lang of data.languages) {
-    const file = `${OUTPUT_DIR}/dnaapp_${lang.code}.sqlite`;
+    const file = `${OUTPUT_DIR}/database_${lang.code}.sqlite`;
     createLanguageDb(file, lang.code, data);
     if (fs.existsSync(file)) {
       encrypt(file);
-      console.log(`  dnaapp_${lang.code}.sqlite: ${(fs.statSync(file).size / 1024).toFixed(1)} KB`);
+      console.log(`  database_${lang.code}.sqlite: ${(fs.statSync(file).size / 1024).toFixed(1)} KB`);
     }
   }
 
@@ -169,7 +169,7 @@ function insertTable(db, table, rows) {
 function encrypt(filePath) {
   const tmp = `${filePath}.tmp`;
   fs.renameSync(filePath, tmp);
-  execSync(`sqlcipher ${tmp} "ATTACH DATABASE '${filePath}' AS encrypted KEY '${PASSWORD}'; SELECT sqlcipher_export('encrypted'); DETACH DATABASE encrypted;"`);
+  execSync(`sqlcipher ${tmp} "ATTACH DATABASE '${filePath}' AS dnaapp KEY '${PASSWORD}'; SELECT sqlcipher_export('dnaapp'); DETACH DATABASE dnaapp;"`);
   fs.unlinkSync(tmp);
   execSync(`sqlcipher ${filePath} "PRAGMA key = '${PASSWORD}'; SELECT count(*) FROM sqlite_master;"`, { stdio: 'pipe' });
 }
@@ -180,7 +180,7 @@ const SCHEMA = `
   CREATE TABLE IF NOT EXISTS item_translations (id INTEGER PRIMARY KEY, category_id INTEGER NOT NULL, sequence INTEGER DEFAULT 0, language_title TEXT, arabic TEXT, translation TEXT, transliteration TEXT, is_visible INTEGER DEFAULT 1, english TEXT);
   CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, event_group_id INTEGER NOT NULL, hijri_date TEXT, date_long TEXT, color TEXT, event_type TEXT, deeplink_id TEXT, deeplink_id_text TEXT, link_type TEXT, sequence INTEGER DEFAULT 0, language_code TEXT NOT NULL DEFAULT 'gu', title TEXT, description TEXT, is_visible INTEGER DEFAULT 1);
   CREATE TABLE IF NOT EXISTS quran (ayat_id INTEGER PRIMARY KEY, sura_id INTEGER NOT NULL, ayat_no INTEGER NOT NULL, arabic TEXT, is_sajda INTEGER DEFAULT 0, juz_no INTEGER, ruku_no INTEGER, page_no INTEGER, sura_name_ar TEXT, sura_name_guj TEXT, sura_name_en TEXT, sura_name_ur TEXT, sura_name_ro TEXT, sura_name_fa TEXT, sura_name_fr TEXT, sura_type TEXT, total_ayat INTEGER, audio_url TEXT, video_url TEXT, sequence INTEGER DEFAULT 0, is_visible INTEGER DEFAULT 1, UNIQUE(sura_id, ayat_no));
-  CREATE TABLE IF NOT EXISTS quran_translations (ayat_id INTEGER NOT NULL, language_code TEXT NOT NULL, translation TEXT, transliteration TEXT, is_visible INTEGER DEFAULT 1, PRIMARY KEY(ayat_id, language_code));
+  CREATE TABLE IF NOT EXISTS quran_translations (id INTEGER PRIMARY KEY, ayat_id INTEGER NOT NULL, language_code TEXT NOT NULL, translation TEXT, transliteration TEXT, is_visible INTEGER DEFAULT 1, UNIQUE(ayat_id, language_code));
   CREATE INDEX IF NOT EXISTS idx_categories_english_name ON categories(english_name);
   CREATE INDEX IF NOT EXISTS idx_categories_parent ON categories(parent_id);
   CREATE INDEX IF NOT EXISTS idx_categories_sequence ON categories(sequence);

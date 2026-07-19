@@ -296,12 +296,13 @@ def create_language_db(source_path, language, output_path):
         );
 
         CREATE TABLE IF NOT EXISTS quran_translations (
+            id INTEGER PRIMARY KEY,
             ayat_id INTEGER NOT NULL,
             language_code TEXT NOT NULL,
             translation TEXT,
             transliteration TEXT,
             is_visible INTEGER DEFAULT 1,
-            PRIMARY KEY(ayat_id, language_code)
+            UNIQUE(ayat_id, language_code)
         );
 
         CREATE TABLE IF NOT EXISTS users (
@@ -449,15 +450,15 @@ def create_language_db(source_path, language, output_path):
 
         src_cur.execute("SELECT * FROM quran_translations WHERE language_code = ? ORDER BY ayat_id", (lang_code,))
         trans_rows = src_cur.fetchall()
-        trans_ayat_id = 1
+        trans_id = 1
         for row in trans_rows:
             # Source has: id, quran_id, language_code, translation, transliteration, is_visible
-            # Target has: ayat_id, language_code, translation, transliteration, is_visible
+            # Target has: id, ayat_id, language_code, translation, transliteration, is_visible
             out_cur.execute("""
-                INSERT INTO quran_translations (ayat_id, language_code, translation, transliteration, is_visible)
-                VALUES (?, ?, ?, ?, ?)
-            """, (trans_ayat_id, row[2], row[3], row[4], row[5]))
-            trans_ayat_id += 1
+                INSERT INTO quran_translations (id, ayat_id, language_code, translation, transliteration, is_visible)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (trans_id, row[1], row[2], row[3], row[4], row[5]))
+            trans_id += 1
         trans_count = len(trans_rows)
     except Exception:
         pass

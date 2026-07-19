@@ -857,12 +857,13 @@ const app = createApp({
                 UNIQUE(sura_id, ayat_no)
             );
             CREATE TABLE IF NOT EXISTS quran_translations (
+                id INTEGER PRIMARY KEY,
                 ayat_id INTEGER NOT NULL,
                 language_code TEXT NOT NULL,
                 translation TEXT,
                 transliteration TEXT,
                 is_visible INTEGER DEFAULT 1,
-                PRIMARY KEY(ayat_id, language_code)
+                UNIQUE(ayat_id, language_code)
             );
             CREATE INDEX IF NOT EXISTS idx_categories_english_name ON categories(english_name);
             CREATE INDEX IF NOT EXISTS idx_categories_parent ON categories(parent_id);
@@ -1056,13 +1057,13 @@ const app = createApp({
                 'sequence', 'is_visible'
             ], data.quran || []);
             insertRows(db, 'quran_translations', [
-                'ayat_id', 'language_code', 'translation', 'transliteration', 'is_visible'
+                'id', 'ayat_id', 'language_code', 'translation', 'transliteration', 'is_visible'
             ], data.quranTranslations || []);
 
             const raw = db.export();
             db.close();
 
-            const filename = `dnaapp_${langCode}.sqlite`;
+            const filename = `database_${langCode}.sqlite`;
             downloadFile(raw, filename);
 
             return { name: filename, size: formatBytes(raw.byteLength) };
@@ -1157,7 +1158,7 @@ const app = createApp({
                     'sequence', 'is_visible'
                 ], data.quran || []);
                 insertRows(db, 'quran_translations', [
-                    'ayat_id', 'language_code', 'translation', 'transliteration', 'is_visible'
+                    'id', 'ayat_id', 'language_code', 'translation', 'transliteration', 'is_visible'
                 ], data.quranTranslations || []);
 
                 exportProgress.percent = 90;
@@ -1166,7 +1167,7 @@ const app = createApp({
                 const raw = db.export();
                 db.close();
 
-                const filename = 'dnaapp.sqlite';
+                const filename = 'database.sqlite';
                 downloadFile(raw, filename);
 
                 exportProgress.files.push({ name: filename, size: formatBytes(raw.byteLength) });
